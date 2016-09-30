@@ -19,7 +19,7 @@ how it could be in erlang style
 it doesn't just look similar- it's much better!
 no DSL, no StateMachineModel, StatemachineParser, StateMachineCommand, StateMachineEvent etc. this is plain-old-erlang.. objects send (oneway!) messages and objects (selectively!) receive messages. nothing else needed
 
-even though in erlang it's purpose is to communicate between threads, could this help in single threaded concurrent javascript?
+even though in erlang.. message-passing/selective-receive is how you communicate between threads, could this help in single threaded, concurrent javascript?
 
 suggestions, comments, feddback, help welcome and appreciated
 
