@@ -1,5 +1,5 @@
 # expert-disco
-erlang-style mailbox/msg passing for js
+erlang-style mailbox/msg passing/green callbacks for js
 
 i read [joe armstrong's blog post on red vs green callbacks](http://joearms.github.io/2013/04/02/Red-and-Green-Callbacks.html), or javascript vs erlang callbacks, when it appeared on hacker news. i didn't understand it at all and thought the difference he was highlighting was just semantic.
 
