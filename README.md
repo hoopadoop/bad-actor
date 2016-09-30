@@ -12,7 +12,7 @@ processes are isolated, errors contained
 i dont know much about erlang, but it looked similar to [fowler's statemachines](http://www.informit.com/articles/article.aspx?p=1592379) which i like
 
 ```
-//example state machine config in json for Miss Grant’s secret compartment
+// example state machine config in json for Miss Grant’s secret compartment
 // (from martin fowler's blog)
 
 function lockDoor(){...}
@@ -32,9 +32,50 @@ statemachineConfig = {
   {state: 'unlockedPanel', enteractions: ['unlockPanel', 'lockDoor'], transitions: [{panelClosed: 'idle'}]
 }
 ```
+rough translation to erlang (i dont know erlang!)
 
-todo
-how it could be in erlang style
+```
+lockDoor() -> ...
+unlockDoor() -> ...
+lockPanel() -> ...
+unlockPanel() -> ...
+
+idle() ->
+    unlockDoor()
+    lockPanel()
+    receive
+        doorClosed ->
+            active()
+    end.
+    
+active() ->
+    receive
+        drawerOpened ->
+            waitingForLight();
+        lightOn ->
+            waitingForDrawer()
+    end.
+    
+waitingForLight() ->
+    receive
+        lightOn ->
+            unlockedPanel()
+    end.    
+    
+waitingForDrawer() ->
+    receive
+        drawerOpened ->
+            unlockedPanel()
+    end.    
+    
+unlockedPanel() ->
+    unlockPanel()
+    lockDoor()
+    receive
+        panelClosed ->
+            idle()
+    end.     
+```
 
 it doesn't just look similar- it's much better!
 no DSL, no StateMachineModel, StatemachineParser, StateMachineCommand, StateMachineEvent etc. this is plain-old-erlang.. objects send (oneway!) messages and objects (selectively!) receive messages. nothing else needed
