@@ -11,8 +11,9 @@ processes are isolated, errors contained
 
 i dont know much about erlang, but it looked similar to [fowler's statemachines](http://www.informit.com/articles/article.aspx?p=1592379) which i like
 
-example state machine config in json for Miss Grant’s secret compartment
-(from martin fowler's blog)
+```
+//example state machine config in json for Miss Grant’s secret compartment
+// (from martin fowler's blog)
 
 function lockDoor(){...}
 function unlockDoor(){...}
@@ -30,7 +31,7 @@ statemachineConfig = {
   {state: 'waitingForDrawer', transitions: [{drawerOpened: 'unlockedPanel'}],
   {state: 'unlockedPanel', enteractions: ['unlockPanel', 'lockDoor'], transitions: [{panelClosed: 'idle'}]
 }
-
+```
 
 todo
 how it could be in erlang style
