@@ -1,6 +1,8 @@
 # expert-disco
 erlang-style mailbox/msg passing for js
 
+i read [joe armstrong's blog post] on red vs green callbacks](http://joearms.github.io/2013/04/02/Red-and-Green-Callbacks.html), or javascript vs erlang callbacks, when it appeared on hacker news. i didn't understand it at all and thought the difference he was highlighting was just semantic.
+
 i have many problems with concurrency in single threaded javascript
 
 i was reading about [threads and messaging and inbox and selective retreival of incoming messages in erlang](http://ndpar.blogspot.co.uk/2010/11/erlang-explained-selective-receive.html) ie different priority messages and how it worked
@@ -22,4 +24,5 @@ no DSL, no StateMachineModel, StatemachineParser, StateMachineCommand, StateMach
 even though in erlang.. message-passing/selective-receive is how you communicate between threads, could this help in single threaded, concurrent javascript?
 
 suggestions, comments, feddback, help welcome and appreciated
+
 
