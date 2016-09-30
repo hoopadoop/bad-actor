@@ -3,7 +3,7 @@ erlang-style mailbox/msg passing for js
 
 i have many problems with concurrency in single threaded javascript
 
-[i was reading about threads and messaging and inbox and selective retreival of incoming messages in erlang ie different priority messages and how it worked](http://ndpar.blogspot.co.uk/2010/11/erlang-explained-selective-receive.html)
+i was reading about [threads and messaging and inbox and selective retreival of incoming messages in erlang](http://ndpar.blogspot.co.uk/2010/11/erlang-explained-selective-receive.html) ie different priority messages and how it worked
 
 processes are isolated, errors contained
 
