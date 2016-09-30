@@ -80,7 +80,7 @@ unlockedPanel() ->
 it doesn't just look similar- it's much better!
 no DSL, no StateMachineModel, StatemachineParser, StateMachineCommand, StateMachineEvent etc. this is plain-old-erlang.. objects send (oneway!) messages and objects (selectively!) receive messages. nothing else needed
 
-so, reading red vs green again.. i think i get it now.
+so, reading red vs green again.. i think i get it now. the control flow in javascript with a callback is messed up..your code continues to execute but jumps to a different place when some event happens.  in erlang it's  more like you've written a state machine to control program flow - but in a way that's both simpler and more powerful than  this kind of configurable statemachine can model.
 
 even though in erlang.. message-passing/selective-receive is how you communicate between threads, could this help in single threaded, concurrent javascript?
 
