@@ -85,10 +85,10 @@ so, reading red vs green again.. i think i get it now. the control flow in javas
 even though in erlang.. message-passing/selective-receive is how you communicate between threads, could this help in single threaded, concurrent javascript?
 
 some others that i need to evaluate
-https://github.com/mental/webactors 
-http://beatniksoftware.com/erjs/ 
-https://github.com/orph/erjs 
-https://github.com/bryanjos/processes 
+  https://github.com/mental/webactors 
+  http://beatniksoftware.com/erjs/ 
+  https://github.com/orph/erjs 
+  https://github.com/bryanjos/processes 
 
 
 suggestions, comments, feddback, help welcome and appreciated
