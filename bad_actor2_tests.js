@@ -3,8 +3,15 @@
 QUnit.module('bad_actor2')
 import BadActor2, {BLOCKED_ERROR, TIME_OUT} from 'modules/bad_actor2'
 
+// import _ from 'underscore'
+
 function nullf(): void {}
 const nullPattern = {match: '', action: nullf}
+
+/* you can use these to run just one test.. replace test with ttest
+QUnit.ttest = QUnit.test
+QUnit.test = function() {}
+*/
 
 QUnit.test('test start from full, simple match', (assert) => {
   const actor = new BadActor2()
@@ -290,23 +297,20 @@ QUnit.test('mixing in the actor somehow', (assert) => {
   var strokeCount = 0
   const done = assert.async()
 
-  function DogConstructor() {
-    const actor = new BadActor2()
-    function dogLoop() {
-      actor.RECEIVE([{
+  class DogConstructor extends BadActor2 {
+    dogLoop() {
+      this.RECEIVE([{
         match: 'stroke',
         action: () => {
           strokeCount++
-          dogLoop()
+          this.dogLoop()
         }}], nullf)
     }
-    actor.dogLoop = dogLoop
-    dogLoop()
-    return actor
   }
 
-  var dog = DogConstructor()
-  var strokeDog = () => { debugger; dog.sendMsg('stroke') }
+  const dog = new DogConstructor()
+  dog.dogLoop()
+  var strokeDog = () => { dog.sendMsg('stroke') }
   setTimeout(strokeDog, 10)
   setTimeout(strokeDog, 100)
   setTimeout(strokeDog, 150)
@@ -323,20 +327,19 @@ QUnit.test('mixing in the actor somehow', (assert) => {
 QUnit.test('ugh timeout zero is messed up with nested receive', (assert) => {
   const done = assert.async()
   const results = []
-  function DogConstructor() {
-    const actor = new BadActor2()
-    function dogLoop() {
-      actor.RECEIVE([{
+  class DogConstructor extends BadActor2 {
+    startLoop() {
+      this.RECEIVE([{
         match: 'stroke1',
         action: () => {
           results.push('one')
 
-          actor.RECEIVE([{
+          this.RECEIVE([{
             match: 'stroke2',
             action: () => {
               results.push('two')
 
-              actor.RECEIVE([{
+              this.RECEIVE([{
                 match: 'stroke3',
                 action: () => {
                   results.push('three')
@@ -344,16 +347,15 @@ QUnit.test('ugh timeout zero is messed up with nested receive', (assert) => {
             }}], nullf)
         }},
         {match: TIME_OUT, action: function() {
-          results.push('timeoutreceived')}}
+          results.push('timeoutreceived')
+        }}
         ], () => {
           results.push('complete')
         }, 0)
     }
-    actor.startLoop = dogLoop
-    return actor
   }
 
-  var dog = DogConstructor()
+  var dog = new DogConstructor()
   dog.sendMsg('stroke1')
   dog.startLoop()
   setTimeout(() => { dog.sendMsg('stroke2') }, 100)
@@ -410,26 +412,30 @@ QUnit.test('what happens if you infinte loop?', (assert) => {
 })
 
 QUnit.test('red green callbacks', (assert) => {
-  function AsyncObConstructor(actor) {
-    setTimeout(function() {
-      actor.sendMsg('urlLoaded')
-    })
-    this.cleanup = nullf
+  const done = assert.async()
+  var res = 'initialvalue'
+
+  class AsyncObConstructor extends BadActor2 {
+    init() {
+      this.RECEIVE([{
+        match: 'urlLoaded',
+        action: () => {
+          res = 'setingaction'
+        }}], () => {
+          this.cleanup()
+          assert.ok(res === 'setingaction', 'this shouldnt happen')
+          done()
+        })
+    }
+    cleanup() {}
   }
 
-  const done = assert.async()
-  const actor = new BadActor2()
-  const asyncOb = new AsyncObConstructor(actor)
-  var res = 'initialvalue'
-  actor.RECEIVE([{
-    match: 'urlLoaded',
-    action: () => {
-      res = 'setingaction'
-    }}], function() {
-      asyncOb.cleanup()
-      assert.ok(res === 'setingaction', 'this shouldnt happen')
-      done()
-    })
+  const asyncOb = new AsyncObConstructor()
+  asyncOb.init()
+
+  setTimeout(function() {
+    asyncOb.sendMsg('urlLoaded')
+  })
 })
 
 QUnit.test('lets test multiple objects', (assert) => {
@@ -467,3 +473,100 @@ QUnit.test('lets test multiple objects', (assert) => {
   clientActor.init({server: serverActor})
 })
 
+QUnit.test('check normal timeout and crashes in action', (assert) => {
+  const done = assert.async()
+  const actor = new BadActor2()
+  const results = []
+  actor.RECEIVE([
+    {match: TIME_OUT, action: function() {
+      results.push('this should happen')
+      throw new Error('i cant javascript')
+    }}], function() {
+      results.push('this shouldnt happen')
+    }, 1)
+
+  setTimeout(function() {
+    assert.ok(results.length === 1, 'after shouldnt happen')
+    assert.ok(results[0] === 'this should happen', 'after shouldnt happen')
+    done()
+  }, 10)
+})
+
+QUnit.test('check normal timeout and crashes in after', (assert) => {
+  const done = assert.async()
+  const actor = new BadActor2()
+  const results = []
+  actor.RECEIVE([
+    {match: TIME_OUT, action: function() {
+      results.push('timeoutreceived')
+    }}], function() {
+      throw new Error('i cant javascript')
+    }, 1)
+
+  setTimeout(function() {
+    assert.ok(results[0] === 'timeoutreceived', 'timeout didnt trigger')
+    done()
+  }, 10)
+})
+
+QUnit.test('check immediate timeout and crashes in action', (assert) => {
+  const done = assert.async()
+  const actor = new BadActor2()
+  const results = []
+  actor.RECEIVE([
+    {match: TIME_OUT, action: function() {
+      throw new Error('i cant javascript')
+    }}], function() {
+      results.push('this shouldnt happen')
+    }, 0)
+
+  setTimeout(function() {
+    assert.ok(results.length === 0, 'after shouldnt happen')
+    done()
+  }, 10)
+})
+
+QUnit.test('check immediate timeout and crashes in after', (assert) => {
+  const done = assert.async()
+  const actor = new BadActor2()
+  const results = []
+  actor.RECEIVE([
+    {match: TIME_OUT, action: function() {
+      results.push('timeoutreceived')
+    }}], function() {
+      throw new Error('i cant javascript')
+    }, 0)
+
+  setTimeout(function() {
+    assert.ok(results[0] === 'timeoutreceived', 'timeout didnt trigger')
+    done()
+  }, 10)
+})
+
+QUnit.test('test unwinding the stack a pid high up the stack has immediate timeout and it crashes in the timeout action', (assert) => {
+  const done = assert.async()
+  const actor = new BadActor2()
+  const results = []
+  actor.sendMsg('ping')
+  actor.sendMsg('pong')
+  actor.RECEIVE([
+    {match: 'ping', action: () => {
+      actor.RECEIVE([
+        {match: 'pong', action: () => {
+          debugger
+        }}], nullf)
+    }},
+    {match: TIME_OUT, action: () => {
+      throw new Error('i should throw when unwinding')
+    }}], function() {
+      results.push('timeoutreceived')
+    }, 0)
+
+  setTimeout(function() {
+    assert.ok(results.length === 0, 'continuation should not have been called')
+    done()
+  }, 10)
+})
+
+// todo: add links and monitors
+// todo: http://marcelog.github.io/articles/erlang_link_vs_monitor_difference.html
