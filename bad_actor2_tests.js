@@ -1,9 +1,7 @@
 /* global QUnit */
 // @flow
 QUnit.module('bad_actor2')
-import BadActor2, {BLOCKED_ERROR, TIME_OUT} from 'modules/bad_actor2'
-
-// import _ from 'underscore'
+import BadActor2, {BLOCKED_ERROR, TIME_OUT, DOWN, EXIT} from 'modules/bad_actor2'
 
 function nullf(): void {}
 const nullPattern = {match: '', action: nullf}
@@ -568,5 +566,81 @@ QUnit.test('test unwinding the stack a pid high up the stack has immediate timeo
   }, 10)
 })
 
-// todo: add links and monitors
-// todo: http://marcelog.github.io/articles/erlang_link_vs_monitor_difference.html
+
+// good link and monitor reference http://marcelog.github.io/articles/erlang_link_vs_monitor_difference.html
+QUnit.test('test simple link - forward', (assert) => {
+  // remember links are two way
+  const done = assert.async()
+  const actor1 = new BadActor2()
+  const actor2 = new BadActor2()
+  actor2.link(actor1)
+  actor1.RECEIVE([
+    {match: 'simulate_error', action: () => {
+      throw new Error('derp')
+    }}], nullf)
+  actor1.sendMsg('simulate_error')
+  assert.ok(actor2.DEAD, 'the error should kill the linked actor')
+  done()
+})
+
+QUnit.test('test simple link - backwards', (assert) => {
+  const done = assert.async()
+  const actor1 = new BadActor2()
+  const actor2 = new BadActor2()
+  actor2.link(actor1)
+  actor2.RECEIVE([
+    {match: 'simulate_error', action: () => {
+      throw new Error('derp')
+    }}], nullf)
+  actor2.sendMsg('simulate_error')
+  assert.ok(actor1.DEAD, 'the error should kill the linked actor')
+  done()
+})
+
+QUnit.test('test simple link - trap exit', (assert) => {
+  const done = assert.async()
+  const actor1 = new BadActor2()
+  const actor2 = new BadActor2()
+  actor2.trapExit(true)
+
+  actor2.link(actor1)
+  actor1.RECEIVE([
+    {match: 'simulate_error', action: () => {
+      throw new Error('derp')
+    }}], nullf)
+
+  actor2.RECEIVE([
+    {match: EXIT, action: () => {
+      assert.ok(!actor2.DEAD, 'actor2 should trap the exit')
+      done()
+    }}], nullf)
+
+  actor1.sendMsg('simulate_error')
+})
+
+QUnit.test('test simple monitor', (assert) => {
+  // monitors are one way
+  const done = assert.async()
+  const actor1 = new BadActor2()
+  const actor2 = new BadActor2()
+  actor2.monitor(actor1)
+
+  const results = []
+  actor1.RECEIVE([
+    {match: 'simulate_error', action: () => {
+      throw new Error('derp')
+    }}], nullf)
+
+  actor2.RECEIVE([
+    {match: DOWN, action: () => {
+      results.push('todo: we need to send the object and the error')
+    }}], nullf)
+
+  actor1.sendMsg('simulate_error')
+
+  setTimeout(function() {
+    assert.ok(results.length === 1, 'we should have received the DOWN')
+    assert.ok(results[0] === 'todo: we need to send the object and the error', 'we should have received the DOWN')
+    done()
+  }, 10)
+})
