@@ -1,0 +1,243 @@
+/* @flow */
+import _ from 'underscore'
+import {assertError} from 'modules/boo_assert'
+
+export const BLOCKED_ERROR: Error = new Error('attempt to receive while blocking')
+
+type ContinuationFunctionT = () => void
+type ActionFunctionT = () => void
+
+type MsgT = string
+type MatchObjectT = {match: MsgT, action: ActionFunctionT}
+type MatchObectsT = Array<MatchObjectT>
+
+var cntxtCounter = 1
+type ContextT = {id: number, blocking: boolean, timer: ?number, ms: MatchObectsT, continuation: ContinuationFunctionT}
+
+export const TIME_OUT: string = '1234567_TIMEOUT'
+export const DOWN: string = '1234567_DOWN'
+export const EXIT: string = '1234567_EXIT'
+
+type Exit1T = {name: '1234567_EXIT'}
+type Exit2T = {name: 'not yet needed'}
+type SignalT = Exit1T | Exit2T
+
+const IMMEDIATE_TIMEOUT = -1
+
+function tempReportError(e) {
+  console.error(e)
+}
+function matches(msg: MsgT, pattern: MsgT): boolean {
+  return msg === pattern
+}
+
+export default class BadActor2 {
+  _cntxStack: Array<ContextT>
+  _inbox: Array<MsgT>
+  _savedMsgs: Array<MsgT>
+  _monitors: Array<BadActor2>
+  _links: Array<BadActor2>
+  _trapExit: boolean
+
+  constructor() {
+    this.resetState()
+  }
+
+  resetState(): void {
+    this._cntxStack = []
+    this._inbox = []
+    this._savedMsgs = []
+    this._monitors = []
+    this._links = []
+    this._trapExit = false
+  }
+
+  trapExit(flag: boolean): void {
+    this._trapExit = flag
+  }
+
+  link(actor: BadActor2): void {
+    assertError(actor && actor !== this, 'dont link to null or self')
+    if (!_.contains(actor._links, this)) actor._links.push(this) // ugh this needs an accessor
+    if (!_.contains(this._links, actor)) this._links.push(actor)
+  }
+
+  monitor(actor: BadActor2): void {
+    assertError(actor && actor !== this, 'dont link to null or self')
+    actor._monitors.push(this) // ugh this needs an accessor
+  }
+
+  signal(msg: SignalT): void {
+    switch (msg.name) {
+    case EXIT:
+      if (this._trapExit)
+        this.sendMsg(EXIT)
+      else
+        this._killObject()
+      break
+    }
+  }
+
+  sendMsg(msg: MsgT): void {
+    if (msg === TIME_OUT) throw new Error('timeout is private')
+    this._inbox.push(msg)
+    if (this._cntxStack.length && this._cntxStack[this._cntxStack.length - 1]['blocking']) {
+      try {
+        this.RECEIVE(null, null)
+      } catch (e) {
+        // this protects the caller, but how to kill the object?
+        this._killObject()
+      }
+    }
+  }
+
+  _performAction(actionf: Function): boolean {
+    try {
+      actionf()
+      return true
+    } catch (e) {
+      this._killObject()
+      tempReportError(e)
+      // -- need to signal or something
+      return false
+    }
+  }
+
+  _unwindCntxtStack(): void {
+    for (let i = this._cntxStack.length; i > 0; i--) {
+      var cntxt = this._cntxStack.pop()
+      assertError(cntxt['timer'] === IMMEDIATE_TIMEOUT || cntxt['timer'] == null, 'timeout config error')
+      if (cntxt['timer'] === IMMEDIATE_TIMEOUT) {
+        const timeOutObject = _.find(cntxt.ms, function(matchObject) { return matchObject.match === TIME_OUT })
+        if (timeOutObject) {
+          let shouldContinue = this._performAction(timeOutObject['action'])
+          if (!shouldContinue) {
+            return
+          }
+        }
+      }
+      // cheekily resusing performAction for the continuation even though it makes it a little bit confusing
+      let shouldContinue = this._performAction(cntxt.continuation)
+      if (!shouldContinue) return
+    }
+  }
+
+  _killObject(): void {
+    this.DEAD = true
+    for (let i = 0; i < this._cntxStack.length; i++) {
+      let cntxt = this._cntxStack[i]
+      cntxt.ms = null
+      cntxt.continuation = null
+      if (cntxt['timer'] && cntxt['timer'] !== IMMEDIATE_TIMEOUT) {
+        clearTimeout(cntxt['timer'])
+        cntxt['timer'] = null
+      }
+    }
+    this.sendMsg = () => {}
+    this.RECEIVE = () => {}
+    this._monitors.forEach((monitor) => {
+      monitor.sendMsg(DOWN)
+    })
+    this._links.forEach((linked) => {
+      linked._links = _.without(linked._links, this)
+      linked.signal({name: EXIT})
+    })
+    this.resetState()
+  }
+
+  RECEIVE(maybeMatchStatementObjects: ?MatchObectsT, maybeContinuation: ?ContinuationFunctionT, maybeTimeout: ?number): void {
+    assertError((maybeMatchStatementObjects && maybeContinuation) || (!maybeMatchStatementObjects && !maybeContinuation), 'arg error')
+    let cntxt: ContextT
+    let matchStatementObjects: MatchObectsT
+    let continuation: ContinuationFunctionT
+
+    if (maybeMatchStatementObjects && maybeContinuation) {
+      // this is a call not a retry, make a new context
+      matchStatementObjects = maybeMatchStatementObjects
+      continuation = maybeContinuation
+      if (_.chain(this._cntxStack).pluck('blocking').contains(true).value()) {
+        throw BLOCKED_ERROR
+      }
+      cntxt = {id: cntxtCounter++, blocking: false, timer: null, ms: matchStatementObjects, continuation: continuation}
+      let timer = null
+      if (maybeTimeout === 0) {
+        timer = IMMEDIATE_TIMEOUT
+      } else if (maybeTimeout && maybeTimeout > 0) {
+        timer = setTimeout(() => {
+          if (cntxt['timer'] === timer) {
+            cntxt['timer'] = null
+            assertError(this._cntxStack.length > 0 && this._cntxStack[this._cntxStack.length - 1]['blocking'], 'did we forget to clear the timer or something')
+            const timeOutObject = _.find(cntxt.ms, function(matchObject) { return matchObject.match === TIME_OUT })
+            try {
+              if (cntxt['blocking']) debugger
+              let shouldContinue = this._performAction(timeOutObject['action'])
+              if (!shouldContinue) {
+                return
+              }
+
+              this._unwindCntxtStack()
+            } catch (e) {
+              this._killObject()
+            }
+          } else { throw new Error('did we mess up the timer?') }
+        }, maybeTimeout)
+      }
+
+      cntxt['timer'] = timer
+      this._cntxStack.push(cntxt)
+    } else {
+      // no matches were passed in, we want to retry the top of the stack
+      cntxt = this._cntxStack[this._cntxStack.length - 1]
+      if (!cntxt || !cntxt['blocking']) throw new Error('we are only retrying blocking receives')
+      cntxt['blocking'] = false
+      matchStatementObjects = cntxt.ms
+      continuation = cntxt.continuation
+    }
+    const indexOfCurrentCntx = this._cntxStack.length - 1
+    const inboxclone: Array<MsgT> = this._inbox.slice(0)
+    for (let inboxPtr = 0; inboxPtr < inboxclone.length; inboxPtr++) {
+      const msg = inboxclone[inboxPtr]
+      this._inbox.shift()
+      for (let matchStatementPtr = 0; matchStatementPtr < matchStatementObjects.length; matchStatementPtr++) {
+        const matchStatementObject = matchStatementObjects[matchStatementPtr]
+
+        // timeout clause is handled seperately
+        // temp, this is only going to work while we have simple string matching
+        if (matchStatementObject['match'] === TIME_OUT) continue
+
+        const matchResult: boolean = matches(matchStatementObject['match'], msg)
+        if (matchResult) {
+          this._inbox = [...this._savedMsgs, ...this._inbox] // put save queue back, in the right order (the order they arrived) eek they need an index
+          this._savedMsgs = []
+          if (cntxt['timer'] && cntxt['timer'] !== IMMEDIATE_TIMEOUT) {
+            clearTimeout(cntxt['timer'])
+            cntxt['timer'] = null
+          }
+          // shit! the inner receive can be blocking, in which case don't do the continuation
+          if (cntxt['blocking']) debugger
+          let shouldContinue = this._performAction(matchStatementObject['action'])
+          if (!shouldContinue) {
+            return
+          }
+          const innerDidFailToMatchAndIsBlocking: boolean = (this._cntxStack.length > (indexOfCurrentCntx + 1)) && this._cntxStack[this._cntxStack.length - 1]['blocking']
+          if (innerDidFailToMatchAndIsBlocking) {
+            // the inner context is blocking, not us
+            return
+          } else {
+            this._unwindCntxtStack()
+            return
+          }
+        } else {
+          this._savedMsgs.push(msg)
+        }
+      }
+    }
+
+    if (cntxt['timer'] === IMMEDIATE_TIMEOUT) {
+      this._unwindCntxtStack()
+    } else {
+      // we are now blocking, what does this mean? No more receives can be called on this pid, etc.
+      cntxt['blocking'] = true
+    }
+  }
+}
