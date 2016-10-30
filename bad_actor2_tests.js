@@ -659,3 +659,16 @@ QUnit.test('empty mailbox with star match', (assert) => {
   assert.ok(actor._inbox.length === 0, 'mailbox should have been recursively emptied')
   assert.ok(actor._savedMsgs.length === 0, 'mailbox should have been recursively emptied')
 })
+
+QUnit.test('test matching more complex messages', (assert) => {
+  const actor = new BadActor2()
+  actor.sendMsg({self: assert, txt: 'hello'})
+  let itworked = false
+  actor.RECEIVE([
+    {match: {self: assert, txt: 'hello'},
+      action: (a) => {
+        itworked = true
+      }}
+  ], nullf)
+  assert.ok(itworked, 'using underscore we can match more complex objects')
+})
