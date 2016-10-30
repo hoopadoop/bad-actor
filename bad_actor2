@@ -1,6 +1,6 @@
 /* @flow */
 import _ from 'underscore'
-import {assertError} from 'modules/boo_assert'
+import invariant from 'invariant'
 
 export const BLOCKED_ERROR: Error = new Error('attempt to receive while blocking')
 
@@ -12,7 +12,7 @@ type MatchObjectT = {match: MsgT, action: ActionFunctionT}
 type MatchObectsT = Array<MatchObjectT>
 
 var cntxtCounter = 1
-type ContextT = {id: number, blocking: boolean, timer: ?number, ms: MatchObectsT, continuation: ContinuationFunctionT}
+type ContextT = {id: number, blocking: boolean, timer: ?number, ms: ?MatchObectsT, continuation: ?ContinuationFunctionT}
 
 export const TIME_OUT: string = '1234567_TIMEOUT'
 export const DOWN: string = '1234567_DOWN'
@@ -28,6 +28,7 @@ function tempReportError(e) {
   console.error(e)
 }
 function matches(msg: MsgT, pattern: MsgT): boolean {
+  if (msg === '*') return true
   return msg === pattern
 }
 
@@ -38,6 +39,7 @@ export default class BadActor2 {
   _monitors: Array<BadActor2>
   _links: Array<BadActor2>
   _trapExit: boolean
+  DEAD: boolean
 
   constructor() {
     this.resetState()
@@ -57,28 +59,30 @@ export default class BadActor2 {
   }
 
   link(actor: BadActor2): void {
-    assertError(actor && actor !== this, 'dont link to null or self')
+    invariant(actor && actor !== this, 'dont link to null or self')
     if (!_.contains(actor._links, this)) actor._links.push(this) // ugh this needs an accessor
     if (!_.contains(this._links, actor)) this._links.push(actor)
   }
 
   monitor(actor: BadActor2): void {
-    assertError(actor && actor !== this, 'dont link to null or self')
+    invariant(actor && actor !== this, 'dont link to null or self')
     actor._monitors.push(this) // ugh this needs an accessor
   }
 
   signal(msg: SignalT): void {
     switch (msg.name) {
-    case EXIT:
-      if (this._trapExit)
-        this.sendMsg(EXIT)
-      else
-        this._killObject()
-      break
+      case EXIT:
+        if (this._trapExit) {
+          this.sendMsg(EXIT)
+        } else {
+          this._killObject()
+        }
+        break
     }
   }
 
   sendMsg(msg: MsgT): void {
+    if (this.DEAD) return
     if (msg === TIME_OUT) throw new Error('timeout is private')
     this._inbox.push(msg)
     if (this._cntxStack.length && this._cntxStack[this._cntxStack.length - 1]['blocking']) {
@@ -106,7 +110,9 @@ export default class BadActor2 {
   _unwindCntxtStack(): void {
     for (let i = this._cntxStack.length; i > 0; i--) {
       var cntxt = this._cntxStack.pop()
-      assertError(cntxt['timer'] === IMMEDIATE_TIMEOUT || cntxt['timer'] == null, 'timeout config error')
+      invariant(cntxt.ms, 'ms should be here')
+      invariant(cntxt.continuation, 'this should be here')
+      invariant(cntxt['timer'] === IMMEDIATE_TIMEOUT || cntxt['timer'] == null, 'timeout config error')
       if (cntxt['timer'] === IMMEDIATE_TIMEOUT) {
         const timeOutObject = _.find(cntxt.ms, function(matchObject) { return matchObject.match === TIME_OUT })
         if (timeOutObject) {
@@ -133,20 +139,20 @@ export default class BadActor2 {
         cntxt['timer'] = null
       }
     }
-    this.sendMsg = () => {}
-    this.RECEIVE = () => {}
     this._monitors.forEach((monitor) => {
       monitor.sendMsg(DOWN)
     })
     this._links.forEach((linked) => {
       linked._links = _.without(linked._links, this)
-      linked.signal({name: EXIT})
+      const msg: SignalT = {name: '1234567_EXIT'}
+      linked.signal(msg)
     })
     this.resetState()
   }
 
   RECEIVE(maybeMatchStatementObjects: ?MatchObectsT, maybeContinuation: ?ContinuationFunctionT, maybeTimeout: ?number): void {
-    assertError((maybeMatchStatementObjects && maybeContinuation) || (!maybeMatchStatementObjects && !maybeContinuation), 'arg error')
+    if (this.DEAD) return
+    invariant((maybeMatchStatementObjects && maybeContinuation) || (!maybeMatchStatementObjects && !maybeContinuation), 'arg error')
     let cntxt: ContextT
     let matchStatementObjects: MatchObectsT
     let continuation: ContinuationFunctionT
@@ -166,10 +172,13 @@ export default class BadActor2 {
         timer = setTimeout(() => {
           if (cntxt['timer'] === timer) {
             cntxt['timer'] = null
-            assertError(this._cntxStack.length > 0 && this._cntxStack[this._cntxStack.length - 1]['blocking'], 'did we forget to clear the timer or something')
-            const timeOutObject = _.find(cntxt.ms, function(matchObject) { return matchObject.match === TIME_OUT })
+            invariant(cntxt.ms, 'timer would have been cleared if we had been killed')
+            invariant(this._cntxStack.length > 0 && this._cntxStack[this._cntxStack.length - 1]['blocking'], 'did we forget to clear the timer or something')
+            const timeOutObject = _.find(cntxt.ms, function(matchObject) {
+              return matchObject.match === TIME_OUT
+            })
+            invariant(timeOutObject, 'if you passed a timeout value, you must add a timeout clause')
             try {
-              if (cntxt['blocking']) debugger
               let shouldContinue = this._performAction(timeOutObject['action'])
               if (!shouldContinue) {
                 return
@@ -188,10 +197,12 @@ export default class BadActor2 {
     } else {
       // no matches were passed in, we want to retry the top of the stack
       cntxt = this._cntxStack[this._cntxStack.length - 1]
-      if (!cntxt || !cntxt['blocking']) throw new Error('we are only retrying blocking receives')
-      cntxt['blocking'] = false
+      invariant(cntxt && cntxt['blocking'], 'we are only retrying blocking receives')
+      invariant(cntxt.ms, 'must have this')
+      invariant(cntxt.continuation, 'must have this')
       matchStatementObjects = cntxt.ms
       continuation = cntxt.continuation
+      cntxt['blocking'] = false
     }
     const indexOfCurrentCntx = this._cntxStack.length - 1
     const inboxclone: Array<MsgT> = this._inbox.slice(0)
@@ -214,7 +225,7 @@ export default class BadActor2 {
             cntxt['timer'] = null
           }
           // shit! the inner receive can be blocking, in which case don't do the continuation
-          if (cntxt['blocking']) debugger
+          invariant(!cntxt['blocking'], 'blocking sanity check')
           let shouldContinue = this._performAction(matchStatementObject['action'])
           if (!shouldContinue) {
             return
