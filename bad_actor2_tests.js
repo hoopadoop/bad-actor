@@ -644,3 +644,18 @@ QUnit.test('test simple monitor', (assert) => {
     done()
   }, 10)
 })
+
+QUnit.test('empty mailbox with star match', (assert) => {
+  const actor = new BadActor2()
+  actor.sendMsg('one')
+  actor.sendMsg('two')
+  actor.sendMsg('three')
+  function emptyMailbox() {
+    actor.RECEIVE([
+      {match: '*', action: emptyMailbox}
+    ], nullf, 0)
+  }
+  emptyMailbox()
+  assert.ok(actor._inbox.length === 0, 'mailbox should have been recursively emptied')
+  assert.ok(actor._savedMsgs.length === 0, 'mailbox should have been recursively emptied')
+})
