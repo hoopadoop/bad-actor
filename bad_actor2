@@ -7,7 +7,7 @@ export const BLOCKED_ERROR: Error = new Error('attempt to receive while blocking
 type ContinuationFunctionT = () => void
 type ActionFunctionT = () => void
 
-type MsgT = string
+type MsgT = any
 type MatchObjectT = {match: MsgT, action: ActionFunctionT}
 type MatchObectsT = Array<MatchObjectT>
 
@@ -29,7 +29,7 @@ function tempReportError(e) {
 }
 function matches(msg: MsgT, pattern: MsgT): boolean {
   if (msg === '*') return true
-  return msg === pattern
+  return _.isEqual(msg, pattern)
 }
 
 export default class BadActor2 {
@@ -95,14 +95,24 @@ export default class BadActor2 {
     }
   }
 
-  _performAction(actionf: Function): boolean {
+  _performAction(actionf: Function, msg: MsgT): boolean {
     try {
-      actionf()
+      actionf(msg)
       return true
     } catch (e) {
       this._killObject()
       tempReportError(e)
-      // -- need to signal or something
+      return false
+    }
+  }
+
+  _performContinuation(continuef: Function): boolean {
+    try {
+      continuef()
+      return true
+    } catch (e) {
+      this._killObject()
+      tempReportError(e)
       return false
     }
   }
@@ -116,14 +126,13 @@ export default class BadActor2 {
       if (cntxt['timer'] === IMMEDIATE_TIMEOUT) {
         const timeOutObject = _.find(cntxt.ms, function(matchObject) { return matchObject.match === TIME_OUT })
         if (timeOutObject) {
-          let shouldContinue = this._performAction(timeOutObject['action'])
+          let shouldContinue = this._performAction(timeOutObject['action'], null)
           if (!shouldContinue) {
             return
           }
         }
       }
-      // cheekily resusing performAction for the continuation even though it makes it a little bit confusing
-      let shouldContinue = this._performAction(cntxt.continuation)
+      let shouldContinue = this._performContinuation(cntxt.continuation)
       if (!shouldContinue) return
     }
   }
@@ -179,7 +188,7 @@ export default class BadActor2 {
             })
             invariant(timeOutObject, 'if you passed a timeout value, you must add a timeout clause')
             try {
-              let shouldContinue = this._performAction(timeOutObject['action'])
+              let shouldContinue = this._performAction(timeOutObject['action'], null)
               if (!shouldContinue) {
                 return
               }
@@ -226,7 +235,7 @@ export default class BadActor2 {
           }
           // shit! the inner receive can be blocking, in which case don't do the continuation
           invariant(!cntxt['blocking'], 'blocking sanity check')
-          let shouldContinue = this._performAction(matchStatementObject['action'])
+          let shouldContinue = this._performAction(matchStatementObject['action'], msg)
           if (!shouldContinue) {
             return
           }
