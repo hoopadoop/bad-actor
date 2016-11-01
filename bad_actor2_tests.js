@@ -672,3 +672,22 @@ QUnit.test('test matching more complex messages', (assert) => {
   ], nullf)
   assert.ok(itworked, 'using underscore we can match more complex objects')
 })
+
+QUnit.test('test matching more more complex messages', (assert) => {
+  const actor = new BadActor2()
+  actor.sendMsg({
+    self: assert,
+    data: {
+      type: 'error',
+      txt: 'hello'
+    }
+  })
+  let itworked = false
+  actor.RECEIVE([
+    {match: {self: assert, data: {type: 'error', txt: '*'}},
+     action: (a) => {
+       itworked = true
+     }}
+  ], nullf)
+  assert.ok(itworked, 'using underscore we can match more complex objects')
+})
