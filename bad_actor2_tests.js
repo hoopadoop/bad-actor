@@ -1,7 +1,8 @@
-/* global QUnit */
 // @flow
+/* global QUnit */
+
 QUnit.module('bad_actor2')
-import BadActor2, {BLOCKED_ERROR, TIME_OUT, DOWN, EXIT} from 'modules/bad_actor2'
+import BadActor2, {BLOCKED_ERROR, TIME_OUT, DOWN, EXIT, register, unregister, sendMsg, registered} from 'modules/bad_actor2'
 
 function nullf(): void {}
 const nullPattern = {match: '', action: nullf}
@@ -16,9 +17,11 @@ QUnit.test('test start from full, simple match', (assert) => {
   const testSate2 = {}
   actor._inbox.push('krakov')
 
-  actor.RECEIVE([{match: 'krakov', action: function() {
-    testSate2.didMatch = true
-  }}], function() {
+  actor.RECEIVE([{
+    match: 'krakov',
+    action: function() {
+      testSate2.didMatch = true
+    }}], function() {
     testSate2.continuationWasCalled = true
   })
   assert.ok(testSate2.didMatch, 'testSate2 should have matched krakov')
@@ -29,9 +32,11 @@ QUnit.test('test start from full, simple fail', (assert) => {
   const actor = new BadActor2()
   var testSate3 = {}
   actor._inbox.push('krakov')
-  actor.RECEIVE([{match: 'berlin', action: function() {
-    testSate3.didMatch = true
-  }}], function() {
+  actor.RECEIVE([{
+    match: 'berlin',
+    action: function() {
+      testSate3.didMatch = true
+    }}], function() {
     testSate3.continuationWasCalled = true
   })
   assert.ok(!testSate3.didMatch, 'testSate3 should not have matched berlin')
@@ -48,17 +53,19 @@ QUnit.test('test start from full, simple fail', (assert) => {
 
 QUnit.test('test start from full, simple out of order match', (assert) => {
   const actor = new BadActor2()
-  var testSate4_1 = {}
+  var testSate41 = {}
   actor._inbox.push('krakov')
   actor._inbox.push('berlin')
   actor._inbox.push('moscow')
-  actor.RECEIVE([{match: 'berlin', action: function() {
-    testSate4_1.didMatch = true
-  }}], function() {
-    testSate4_1.continuationWasCalled = true
+  actor.RECEIVE([{
+    match: 'berlin',
+    action: function() {
+      testSate41.didMatch = true
+    }}], function() {
+    testSate41.continuationWasCalled = true
   })
-  assert.ok(testSate4_1.didMatch, 'testSate4_1 should not have matched berlin')
-  assert.ok(testSate4_1.continuationWasCalled, 'testSate4_1 continuation should not be called')
+  assert.ok(testSate41.didMatch, 'testSate4_1 should not have matched berlin')
+  assert.ok(testSate41.continuationWasCalled, 'testSate4_1 continuation should not be called')
   assert.ok(actor._inbox.join() === 'krakov,moscow', 'we should have matched out of order')
   assert.ok(actor._savedMsgs.length === 0, 'we should have matched out of order')
 
@@ -77,14 +84,18 @@ QUnit.test('test start from full, simple inner match', (assert) => {
   const actor = new BadActor2()
   var testSate5 = {}
   actor._inbox.push('sandwich', 'beetroot')
-  actor.RECEIVE([{match: 'sandwich', action: function() {
-    testSate5.outerDidMatch = true
-    actor.RECEIVE([{match: 'beetroot', action: function() {
-      testSate5.innerDidMatch = true
+  actor.RECEIVE([{
+    match: 'sandwich',
+    action: function() {
+      testSate5.outerDidMatch = true
+      actor.RECEIVE([{
+        match: 'beetroot',
+        action: function() {
+          testSate5.innerDidMatch = true
+        }}], function() {
+        testSate5.innerContinuationWasCalled = true
+      })
     }}], function() {
-      testSate5.innerContinuationWasCalled = true
-    })
-  }}], function() {
     testSate5.outerContinuationWasCalled = true
   })
   assert.ok(testSate5.outerDidMatch, 'testSate5 should have matched krakov')
@@ -97,14 +108,18 @@ QUnit.test('test start from full, simple inner fail', (assert) => {
   const actor = new BadActor2()
   var testSate6 = {}
   actor._inbox.push('sandwich', 'beetroot')
-  actor.RECEIVE([{match: 'sandwich', action: function() {
-    testSate6.outerDidMatch = true
-    actor.RECEIVE([{match: 'cabbage', action: function() {
-      testSate6.innerDidMatch = true
+  actor.RECEIVE([{
+    match: 'sandwich',
+    action: function() {
+      testSate6.outerDidMatch = true
+      actor.RECEIVE([{
+        match: 'cabbage',
+        action: function() {
+          testSate6.innerDidMatch = true
+        }}], function() {
+        testSate6.innerContinuationWasCalled = true
+      })
     }}], function() {
-      testSate6.innerContinuationWasCalled = true
-    })
-  }}], function() {
     testSate6.outerContinuationWasCalled = true
   })
   assert.ok(testSate6.outerDidMatch, 'testSate6 should have matched krakov')
@@ -123,9 +138,11 @@ QUnit.test('test start from full, simple inner fail', (assert) => {
 QUnit.test('test start from empty, simple match', (assert) => {
   const actor = new BadActor2()
   var testSate1 = {}
-  actor.RECEIVE([{match: 'YES', action: function() {
-    testSate1.didMatch = true
-  }}], function() {
+  actor.RECEIVE([{
+    match: 'YES',
+    action: function() {
+      testSate1.didMatch = true
+    }}], function() {
     testSate1.continuationWasCalled = true
   })
   actor.sendMsg('YES')
@@ -136,9 +153,11 @@ QUnit.test('test start from empty, simple match', (assert) => {
 QUnit.test('test start from empty, simple fail', (assert) => {
   const actor = new BadActor2()
   var testSate8 = {}
-  actor.RECEIVE([{match: 'YES', action: function() {
-    testSate8.didMatch = true
-  }}], function() {
+  actor.RECEIVE([{
+    match: 'YES',
+    action: function() {
+      testSate8.didMatch = true
+    }}], function() {
     testSate8.continuationWasCalled = true
   })
   actor.sendMsg('NO')
@@ -149,14 +168,18 @@ QUnit.test('test start from empty, simple fail', (assert) => {
 QUnit.test('test start from empty, simple inner match', (assert) => {
   const actor = new BadActor2()
   var testState9 = {}
-  actor.RECEIVE([{match: 'sandwich', action: function() {
-    testState9.outerDidMatch = true
-    actor.RECEIVE([{match: 'beetroot', action: function() {
-      testState9.innerDidMatch = true
+  actor.RECEIVE([{
+    match: 'sandwich',
+    action: function() {
+      testState9.outerDidMatch = true
+      actor.RECEIVE([{
+        match: 'beetroot',
+        action: function() {
+          testState9.innerDidMatch = true
+        }}], function() {
+        testState9.innerContinuationWasCalled = true
+      })
     }}], function() {
-      testState9.innerContinuationWasCalled = true
-    })
-  }}], function() {
     testState9.outerContinuationWasCalled = true
   })
   actor.sendMsg('beetroot')
@@ -170,14 +193,18 @@ QUnit.test('test start from empty, simple inner match', (assert) => {
 QUnit.test('test start from empty, simple inner fail', (assert) => {
   const actor = new BadActor2()
   var testSate10 = {}
-  actor.RECEIVE([{match: 'sandwich', action: function() {
-    testSate10.outerDidMatch = true
-    actor.RECEIVE([{match: 'beetroot', action: function() {
-      testSate10.innerDidMatch = true
+  actor.RECEIVE([{
+    match: 'sandwich',
+    action: function() {
+      testSate10.outerDidMatch = true
+      actor.RECEIVE([{
+        match: 'beetroot',
+        action: function() {
+          testSate10.innerDidMatch = true
+        }}], function() {
+        testSate10.innerContinuationWasCalled = true
+      })
     }}], function() {
-      testSate10.innerContinuationWasCalled = true
-    })
-  }}], function() {
     testSate10.outerContinuationWasCalled = true
   })
   actor.sendMsg('rootoot')
@@ -199,12 +226,16 @@ QUnit.test('test start from empty, simple inner fail', (assert) => {
 QUnit.test('test some recursive shit where we send ourself messages in the middle of a match', (assert) => {
   const actor = new BadActor2()
   var testState11 = {results: []}
-  actor.RECEIVE([{match: 'outer', action: function() {
-    actor.sendMsg('whaaaa????')
-    actor.RECEIVE([{match: 'whaaaa????', action: function() {
-      testState11.results.push('inner1')
-    }}], function() { testState11.results.push('inner2') })
-  }}], function() {
+  actor.RECEIVE([{
+    match: 'outer',
+    action: function() {
+      actor.sendMsg('whaaaa????')
+      actor.RECEIVE([{
+        match: 'whaaaa????',
+        action: function() {
+          testState11.results.push('inner1')
+        }}], function() { testState11.results.push('inner2') })
+    }}], function() {
     testState11.results.push('outer')
   })
   actor.sendMsg('outer')
@@ -216,9 +247,11 @@ QUnit.test('test simple timer fires', (assert) => {
   const done = assert.async()
   const actor = new BadActor2()
   const results = []
-  actor.RECEIVE([{match: TIME_OUT, action: function() {
-    results.push('timeoutreceived')
-  }}], function() {
+  actor.RECEIVE([{
+    match: TIME_OUT,
+    action: function() {
+      results.push('timeoutreceived')
+    }}], function() {
     assert.ok(results[0] === 'timeoutreceived', 'timeout didnt trigger')
     done()
   }, 10)
@@ -228,13 +261,15 @@ QUnit.test('test simple timer doesnt fire', (assert) => {
   const done = assert.async()
   const actor = new BadActor2()
   const results = []
-  actor.RECEIVE([
-    {match: 'hello', action: function() {
+  actor.RECEIVE([{
+    match: 'hello',
+    action: function() {
       results.push('helloreceived')
-    }},
-    {match: TIME_OUT, action: function() {
-      results.push('timeoutreceived')
-    }}], function() {}, 100)
+    }}, {
+      match: TIME_OUT,
+      action: function() {
+        results.push('timeoutreceived')
+      }}], function() {}, 100)
   setTimeout(() => {
     actor.sendMsg('hello')
   }, 10)
@@ -249,13 +284,14 @@ QUnit.test('test simple immediate timeout', (assert) => {
   const done = assert.async()
   const actor = new BadActor2()
   const results = []
-  actor.RECEIVE([
-    {match: TIME_OUT, action: function() {
+  actor.RECEIVE([{
+    match: TIME_OUT,
+    action: function() {
       results.push('timeoutreceived')
     }}], function() {
-      assert.ok(results[0] === 'timeoutreceived', 'timeout didnt trigger')
-      done()
-    }, 0)
+    assert.ok(results[0] === 'timeoutreceived', 'timeout didnt trigger')
+    done()
+  }, 0)
 })
 
 QUnit.test('test immediate timeout isnt cancelled', (assert) => {
@@ -263,29 +299,34 @@ QUnit.test('test immediate timeout isnt cancelled', (assert) => {
   const actor = new BadActor2()
   const results = []
   actor.sendMsg('hello')
-  actor.RECEIVE([
-    {match: 'hello', action: function() {
+  actor.RECEIVE([{
+    match: 'hello',
+    action: function() {
       results.push('hello')
-    }},
-    {match: TIME_OUT, action: function() {
-      results.push('timeoutreceived')
-    }}], function() {
-      assert.ok(results.join() === 'hello,timeoutreceived', 'timeout was cancelled')
-      done()
-    }, 0)
+    }}, {
+      match: TIME_OUT,
+      action: function() {
+        results.push('timeoutreceived')
+      }}], function() {
+    assert.ok(results.join() === 'hello,timeoutreceived', 'timeout was cancelled')
+    done()
+  }, 0)
 })
 
 QUnit.test('initial test of an error', (assert) => {
   const actor = new BadActor2()
   actor.sendMsg('hello')
-  actor.RECEIVE([
-    {match: 'hello', action: function() {
+  actor.RECEIVE([{
+    match: 'hello',
+    action: function() {
       throw new Error('please be caught')
     }}], function() {}
                )
   const results = []
   actor.sendMsg('this should just be swallowed')
-  actor.RECEIVE([{match: 'this should just be swallowed', action: () => { results.push('derp')}}], () => {
+  actor.RECEIVE([{
+    match: 'this should just be swallowed',
+    action: () => { results.push('derp') }}], () => {
     results.push('derp again')
   })
   assert.ok(results.length === 0, 'phew im glad we got here')
@@ -343,13 +384,14 @@ QUnit.test('ugh timeout zero is messed up with nested receive', (assert) => {
                   results.push('three')
                 }}], nullf)
             }}], nullf)
-        }},
-        {match: TIME_OUT, action: function() {
-          results.push('timeoutreceived')
-        }}
-        ], () => {
-          results.push('complete')
-        }, 0)
+        }}, {
+          match: TIME_OUT,
+          action: function() {
+            results.push('timeoutreceived')
+          }}
+      ], () => {
+        results.push('complete')
+      }, 0)
     }
   }
 
@@ -374,8 +416,8 @@ QUnit.test('experiment with containing errors', (assert) => {
     action: () => {
       throw new Error('yeah im screwed')
     }}], function() {
-      res = 'setingaction'
-    })
+    res = 'setingaction'
+  })
   actor.sendMsg('fuckthingsup')
   assert.ok(res === 'initialvalue', 'this shouldnt happen')
 })
@@ -420,10 +462,10 @@ QUnit.test('red green callbacks', (assert) => {
         action: () => {
           res = 'setingaction'
         }}], () => {
-          this.cleanup()
-          assert.ok(res === 'setingaction', 'this shouldnt happen')
-          done()
-        })
+        this.cleanup()
+        assert.ok(res === 'setingaction', 'this shouldnt happen')
+        done()
+      })
     }
     cleanup() {}
   }
@@ -475,13 +517,14 @@ QUnit.test('check normal timeout and crashes in action', (assert) => {
   const done = assert.async()
   const actor = new BadActor2()
   const results = []
-  actor.RECEIVE([
-    {match: TIME_OUT, action: function() {
+  actor.RECEIVE([{
+    match: TIME_OUT,
+    action: function() {
       results.push('this should happen')
       throw new Error('i cant javascript')
     }}], function() {
-      results.push('this shouldnt happen')
-    }, 1)
+    results.push('this shouldnt happen')
+  }, 1)
 
   setTimeout(function() {
     assert.ok(results.length === 1, 'after shouldnt happen')
@@ -494,12 +537,13 @@ QUnit.test('check normal timeout and crashes in after', (assert) => {
   const done = assert.async()
   const actor = new BadActor2()
   const results = []
-  actor.RECEIVE([
-    {match: TIME_OUT, action: function() {
+  actor.RECEIVE([{
+    match: TIME_OUT,
+    action: function() {
       results.push('timeoutreceived')
     }}], function() {
-      throw new Error('i cant javascript')
-    }, 1)
+    throw new Error('i cant javascript')
+  }, 1)
 
   setTimeout(function() {
     assert.ok(results[0] === 'timeoutreceived', 'timeout didnt trigger')
@@ -511,12 +555,13 @@ QUnit.test('check immediate timeout and crashes in action', (assert) => {
   const done = assert.async()
   const actor = new BadActor2()
   const results = []
-  actor.RECEIVE([
-    {match: TIME_OUT, action: function() {
+  actor.RECEIVE([{
+    match: TIME_OUT,
+    action: function() {
       throw new Error('i cant javascript')
     }}], function() {
-      results.push('this shouldnt happen')
-    }, 0)
+    results.push('this shouldnt happen')
+  }, 0)
 
   setTimeout(function() {
     assert.ok(results.length === 0, 'after shouldnt happen')
@@ -528,12 +573,13 @@ QUnit.test('check immediate timeout and crashes in after', (assert) => {
   const done = assert.async()
   const actor = new BadActor2()
   const results = []
-  actor.RECEIVE([
-    {match: TIME_OUT, action: function() {
+  actor.RECEIVE([{
+    match: TIME_OUT,
+    action: function() {
       results.push('timeoutreceived')
     }}], function() {
-      throw new Error('i cant javascript')
-    }, 0)
+    throw new Error('i cant javascript')
+  }, 0)
 
   setTimeout(function() {
     assert.ok(results[0] === 'timeoutreceived', 'timeout didnt trigger')
@@ -547,25 +593,27 @@ QUnit.test('test unwinding the stack a pid high up the stack has immediate timeo
   const results = []
   actor.sendMsg('ping')
   actor.sendMsg('pong')
-  actor.RECEIVE([
-    {match: 'ping', action: () => {
-      actor.RECEIVE([
-        {match: 'pong', action: () => {
-          debugger
+  actor.RECEIVE([{
+    match: 'ping',
+    action: () => {
+      actor.RECEIVE([{
+        match: 'pong',
+        action: () => {
+          // debugger
         }}], nullf)
-    }},
-    {match: TIME_OUT, action: () => {
-      throw new Error('i should throw when unwinding')
-    }}], function() {
-      results.push('timeoutreceived')
-    }, 0)
+    }}, {
+      match: TIME_OUT,
+      action: () => {
+        throw new Error('i should throw when unwinding')
+      }}], function() {
+    results.push('timeoutreceived')
+  }, 0)
 
   setTimeout(function() {
     assert.ok(results.length === 0, 'continuation should not have been called')
     done()
   }, 10)
 })
-
 
 // good link and monitor reference http://marcelog.github.io/articles/erlang_link_vs_monitor_difference.html
 QUnit.test('test simple link - forward', (assert) => {
@@ -574,8 +622,9 @@ QUnit.test('test simple link - forward', (assert) => {
   const actor1 = new BadActor2()
   const actor2 = new BadActor2()
   actor2.link(actor1)
-  actor1.RECEIVE([
-    {match: 'simulate_error', action: () => {
+  actor1.RECEIVE([{
+    match: 'simulate_error',
+    action: () => {
       throw new Error('derp')
     }}], nullf)
   actor1.sendMsg('simulate_error')
@@ -588,8 +637,9 @@ QUnit.test('test simple link - backwards', (assert) => {
   const actor1 = new BadActor2()
   const actor2 = new BadActor2()
   actor2.link(actor1)
-  actor2.RECEIVE([
-    {match: 'simulate_error', action: () => {
+  actor2.RECEIVE([{
+    match: 'simulate_error',
+    action: () => {
       throw new Error('derp')
     }}], nullf)
   actor2.sendMsg('simulate_error')
@@ -604,13 +654,15 @@ QUnit.test('test simple link - trap exit', (assert) => {
   actor2.trapExit(true)
 
   actor2.link(actor1)
-  actor1.RECEIVE([
-    {match: 'simulate_error', action: () => {
+  actor1.RECEIVE([{
+    match: 'simulate_error',
+    action: () => {
       throw new Error('derp')
     }}], nullf)
 
-  actor2.RECEIVE([
-    {match: EXIT, action: () => {
+  actor2.RECEIVE([{
+    match: EXIT,
+    action: () => {
       assert.ok(!actor2.DEAD, 'actor2 should trap the exit')
       done()
     }}], nullf)
@@ -626,13 +678,15 @@ QUnit.test('test simple monitor', (assert) => {
   actor2.monitor(actor1)
 
   const results = []
-  actor1.RECEIVE([
-    {match: 'simulate_error', action: () => {
+  actor1.RECEIVE([{
+    match: 'simulate_error',
+    action: () => {
       throw new Error('derp')
     }}], nullf)
 
-  actor2.RECEIVE([
-    {match: DOWN, action: () => {
+  actor2.RECEIVE([{
+    match: DOWN,
+    action: () => {
       results.push('todo: we need to send the object and the error')
     }}], nullf)
 
@@ -683,11 +737,61 @@ QUnit.test('test matching more more complex messages', (assert) => {
     }
   })
   let itworked = false
-  actor.RECEIVE([
-    {match: {self: assert, data: {type: 'error', txt: '*'}},
-     action: (a) => {
-       itworked = true
-     }}
+  actor.RECEIVE([{
+    match: {self: assert, data: {type: 'error', txt: '*'}},
+    action: (a) => {
+      itworked = true
+    }}
   ], nullf)
   assert.ok(itworked, 'using underscore we can match more complex objects')
 })
+
+QUnit.test('basic register name', (assert) => {
+  const actor = new BadActor2()
+  register('server', actor)
+  sendMsg('server', 'hello')
+  assert.ok(actor._inbox[0] === 'hello', 'should be able to send a message throught the name')
+  unregister('server')
+  assert.ok(registered().length === 0, 'you need to clean up')
+})
+
+QUnit.test('basic register name error casses', (assert) => {
+  const actor1 = new BadActor2()
+  const actor2 = new BadActor2()
+  register('server', actor1)
+  assert.throws(() => {
+    register('server', actor2)
+  },
+ //               /another actor/,
+                'cant register two actors to same name')
+  assert.throws(() => {
+    unregister('server2', actor1)
+  },
+  //            /cant unregister/,
+                'cant unregister a something not registered')
+  assert.throws(() => {
+    sendMsg('server2', 'hello')
+  },
+  //            /description/,
+                'cant message a name not registered')
+  assert.ok(registered()[0] === 'server', 'server should be registered')
+  unregister('server')
+  assert.ok(registered().length === 0, 'you need to clean up')
+})
+
+QUnit.test('test name is unregistered when actor dies', (assert) => {
+  const actor = new BadActor2()
+  register('server', actor)
+  actor.RECEIVE([{
+    match: 'simulate_error',
+    action: () => {
+      throw new Error('derp')
+    }}], nullf)
+  sendMsg('server', 'simulate_error')
+  assert.ok(actor.DEAD, 'must be dead')
+  assert.ok(registered().length === 0, 'actor should be unregistered when it dies')
+})
+
+// todo
+// actor needs to die and unregister its name when it reaches the end
+// thinking about it now is the actor stuff any use without otp ?
