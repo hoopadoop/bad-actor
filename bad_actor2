@@ -11,6 +11,9 @@ type MsgT = any
 type MatchObjectT = {match: MsgT, action: ActionFunctionT}
 type MatchObectsT = Array<MatchObjectT>
 
+// globally registered actors
+const _actorsRegister = {}
+
 var cntxtCounter = 1
 type ContextT = {id: number, blocking: boolean, timer: ?number, ms: ?MatchObectsT, continuation: ?ContinuationFunctionT}
 
@@ -27,6 +30,7 @@ const IMMEDIATE_TIMEOUT = -1
 function tempReportError(e) {
   console.error(e)
 }
+
 // nicked from underscore and crippled by me, dont copy this as a general purpose deep equels
 function matches(pattern: MsgT, msg: MsgT, aStack, bStack): boolean {
   if (pattern === '*') return true
@@ -189,6 +193,8 @@ export default class BadActor2 {
   }
 
   _killObject(): void {
+    _.chain(_actorsRegister).pick((v) => (v === this)).keys().each((v) => { unregister(v) })
+
     this.DEAD = true
     for (let i = 0; i < this._cntxStack.length; i++) {
       let cntxt = this._cntxStack[i]
@@ -312,3 +318,26 @@ export default class BadActor2 {
     }
   }
 }
+
+// Not sure if we need Pids or just register the actor
+export function register(name: string, actor: BadActor2): void {
+  if (_actorsRegister[name] && _actorsRegister[name] !== actor) throw new Error('another actor already registered as ' + name)
+  _actorsRegister[name] = actor
+}
+
+export function unregister(name: string): void {
+  if (!_actorsRegister[name]) throw new Error('cant unregister actor ' + name)
+  delete _actorsRegister[name]
+}
+
+export function sendMsg(name: string, msg: MsgT): void {
+  _actorsRegister[name].sendMsg(msg)
+}
+
+export function registered(): Array<string> {
+  return (_.keys(_.pick(_actorsRegister, _.identity)))
+}
+
+// passing the name around and calling whereis on it is a race bacause of restarting. Erlang adds unique refs to messages
+// type PidT = number
+// function whereis(name): PidT | null {}
