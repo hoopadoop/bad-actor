@@ -4,10 +4,10 @@ import invariant from 'invariant'
 
 export const BLOCKED_ERROR: Error = new Error('attempt to receive while blocking')
 
-type ContinuationFunctionT = () => void
-type ActionFunctionT = () => void
-
 type MsgT = any
+type ContinuationFunctionT = () => void
+type ActionFunctionT = (msg: MsgT) => void
+
 type MatchObjectT = {match: MsgT, action: ActionFunctionT}
 type MatchObectsT = Array<MatchObjectT>
 
@@ -96,10 +96,6 @@ export default class BadActor2 {
   _trapExit: boolean
   DEAD: boolean
 
-  constructor() {
-    this.resetState()
-  }
-
   resetState(): void {
     this._cntxStack = []
     this._inbox = []
@@ -109,22 +105,33 @@ export default class BadActor2 {
     this._trapExit = false
   }
 
+  constructor(moduleInit: (actor: BadActor2, ...initArgs?: any) => void, ...initArgs?: any) {
+    this.resetState()
+    moduleInit(this, ...initArgs)
+    // if the module init function didn't block (kinda pointless but not necessarily illegal) we're done so kill us
+    if (!this.DEAD && this._cntxStack.length === 0) this._killObject()
+  }
+
   trapExit(flag: boolean): void {
+    if (this.DEAD) return
     this._trapExit = flag
   }
 
   link(actor: BadActor2): void {
+    if (this.DEAD) return
     invariant(actor && actor !== this, 'dont link to null or self')
     if (!_.contains(actor._links, this)) actor._links.push(this) // ugh this needs an accessor
     if (!_.contains(this._links, actor)) this._links.push(actor)
   }
 
   monitor(actor: BadActor2): void {
+    if (this.DEAD) return
     invariant(actor && actor !== this, 'dont link to null or self')
     actor._monitors.push(this) // ugh this needs an accessor
   }
 
   signal(msg: SignalT): void {
+    if (this.DEAD) return
     switch (msg.name) {
       case EXIT:
         if (this._trapExit) {
@@ -172,7 +179,7 @@ export default class BadActor2 {
     }
   }
 
-  _unwindCntxtStack(): void {
+  _unwindCntxtStack(): boolean {
     for (let i = this._cntxStack.length; i > 0; i--) {
       var cntxt = this._cntxStack.pop()
       invariant(cntxt.ms, 'ms should be here')
@@ -183,13 +190,14 @@ export default class BadActor2 {
         if (timeOutObject) {
           let shouldContinue = this._performAction(timeOutObject['action'], null)
           if (!shouldContinue) {
-            return
+            return false
           }
         }
       }
       let shouldContinue = this._performContinuation(cntxt.continuation)
-      if (!shouldContinue) return
+      if (!shouldContinue) return false
     }
+    return true
   }
 
   _killObject(): void {
@@ -214,6 +222,10 @@ export default class BadActor2 {
       linked.signal(msg)
     })
     this.resetState()
+  }
+
+  _blocking(): boolean {
+    return !!this._cntxStack.length && (this._cntxStack[this._cntxStack.length - 1]['blocking'] === true)
   }
 
   RECEIVE(maybeMatchStatementObjects: ?MatchObectsT, maybeContinuation: ?ContinuationFunctionT, maybeTimeout: ?number): void {
@@ -250,7 +262,10 @@ export default class BadActor2 {
                 return
               }
 
-              this._unwindCntxtStack()
+              let empty = this._unwindCntxtStack()
+              if (empty) {
+                this._killObject()
+              }
             } catch (e) {
               this._killObject()
             }
@@ -286,7 +301,7 @@ export default class BadActor2 {
         if (matchResult) {
           this._inbox = [...this._savedMsgs, ...this._inbox] // put save queue back, in the right order (the order they arrived) eek they need an index
           this._savedMsgs = []
-          if (cntxt['timer'] && cntxt['timer'] !== IMMEDIATE_TIMEOUT) {
+          if (cntxt['timer'] /* && cntxt['timer'] !== IMMEDIATE_TIMEOUT */) {
             clearTimeout(cntxt['timer'])
             cntxt['timer'] = null
           }
@@ -301,7 +316,10 @@ export default class BadActor2 {
             // the inner context is blocking, not us
             return
           } else {
-            this._unwindCntxtStack()
+            let empty = this._unwindCntxtStack()
+            if (empty) {
+              this._killObject()
+            }
             return
           }
         } else {
@@ -311,7 +329,10 @@ export default class BadActor2 {
     }
 
     if (cntxt['timer'] === IMMEDIATE_TIMEOUT) {
-      this._unwindCntxtStack()
+      let empty = this._unwindCntxtStack()
+      if (empty) {
+        this._killObject()
+      }
     } else {
       // we are now blocking, what does this mean? No more receives can be called on this pid, etc.
       cntxt['blocking'] = true
