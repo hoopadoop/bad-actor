@@ -358,17 +358,18 @@ QUnit.test('simple timer doesnt fire', (assert) => {
       match: 'hello',
       action: function() {
         results.push('helloreceived')
-      }}, {
-        match: TIME_OUT,
-        action: function() {
-          results.push('timeoutreceived')
-        }}], function() {}, 100)
+      }
+    }, {
+      match: TIME_OUT,
+      action: function() {
+        results.push('timeoutreceived')
+      }
+    }], nullf, 100)
+
+    setTimeout(() => { actor.sendMsg('hello') }, 10)
+
     setTimeout(() => {
-      actor.sendMsg('hello')
-    }, 10)
-    setTimeout(() => {
-      assert.ok(results.length === 1, 'shit')
-      assert.ok(results[0] === 'helloreceived', 'looks like timeout was cancelled ok ' + results[0])
+      assert.ok(results.join() === 'helloreceived', results.join())
       done()
     }, 200)
   })
