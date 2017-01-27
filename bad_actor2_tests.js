@@ -662,10 +662,8 @@ QUnit.test('test unwinding the stack a pid high up the stack has immediate timeo
 })
 */
 
-// todo: test linking and monitoring when an object dies naturally. ie reason
-
 // good link and monitor reference http://marcelog.github.io/articles/erlang_link_vs_monitor_difference.html
-QUnit.test('test simple link - forward', (assert) => {
+QUnit.test('simple link - forward', (assert) => {
   // remember links are two way
   const done = assert.async()
   const actor1 = new BadActor2((pid) => {
@@ -687,7 +685,7 @@ QUnit.test('test simple link - forward', (assert) => {
   done()
 })
 
-QUnit.test('test simple link - backwards', (assert) => {
+QUnit.test('simple link - backwards', (assert) => {
   const done = assert.async()
   const actor1 = new BadActor2((pid) => {
     pid.RECEIVE([{
@@ -707,7 +705,7 @@ QUnit.test('test simple link - backwards', (assert) => {
   done()
 })
 
-QUnit.test('test simple link - trap exit', (assert) => {
+QUnit.test('simple link - trap exit', (assert) => {
   const done = assert.async()
   const actor1 = new BadActor2((pid) => {
     pid.RECEIVE([{
@@ -718,8 +716,8 @@ QUnit.test('test simple link - trap exit', (assert) => {
   })
   const actor2 = new BadActor2((pid) => {
     pid.RECEIVE([{
-      match: EXIT,
-      action: () => {
+      match: {name: EXIT, pid: '*', reason: '*'},
+      action: (msg) => {
         assert.ok(!actor2.DEAD, 'actor2 should trap the exit')
         done()
       }}], nullf)
@@ -729,7 +727,49 @@ QUnit.test('test simple link - trap exit', (assert) => {
   actor1.sendMsg('simulate_error')
 })
 
-QUnit.test('test simple monitor', (assert) => {
+QUnit.test('normal exit linking', (assert) => {
+  const actor1 = new BadActor2(
+    (pid, serverState) => {
+      pid.RECEIVE([
+        {match: 'unblock', action: () => {}}
+      ], () => { console.log('thats me dead') })
+    })
+  const actor2 = new BadActor2(
+    (pid, clientState) => {
+      pid.RECEIVE([{
+        match: 'unblock',
+        action: (msg) => {}}], nullf)
+    })
+  actor2.link(actor1)
+  actor1.sendMsg('unblock')
+  assert.ok(actor1.DEAD, 'actor1 should die normally')
+  assert.ok(!actor2.DEAD, 'actor2 should ignore normal exits')
+})
+
+QUnit.test('trapping normal exit linking', (assert) => {
+  const results = []
+  const actor1 = new BadActor2(
+    (pid, serverState) => {
+      pid.RECEIVE([
+        {match: 'unblock', action: () => {}}
+      ], () => { console.log('thats me dead') })
+    })
+  const actor2 = new BadActor2(
+    (pid, clientState) => {
+      pid.RECEIVE([{
+        match: {name: EXIT, pid: '*', reason: 'normal'},
+        action: (msg) => {
+          results.push('done')
+        }}], nullf)
+    })
+  actor2.link(actor1)
+  actor2.trapExit(true)
+  actor1.sendMsg('unblock')
+  assert.ok(actor1.DEAD, 'actor1 should die normally')
+  assert.ok(results[0] === 'done', 'actor2 should have received exit message')
+})
+
+QUnit.test('simple monitor', (assert) => {
   // monitors are one way
   const done = assert.async()
   const results = []
@@ -742,7 +782,7 @@ QUnit.test('test simple monitor', (assert) => {
   })
   const actor2 = new BadActor2((pid) => {
     pid.RECEIVE([{
-      match: DOWN,
+      match: {name: DOWN, pid: '*', reason: '*'},
       action: () => {
         results.push('todo: we need to send the object and the error')
       }}], nullf)
@@ -811,8 +851,3 @@ QUnit.test('test name is unregistered when actor dies', (assert) => {
   assert.ok(actor.DEAD, 'must be dead')
   assert.ok(registered().length === 0, 'actor should be unregistered when it dies')
 })
-
-// todo
-// actor needs to die and unregister its name when it reaches the end
-// thinking about it now is the actor stuff any use without otp ?
-// todo: we need exit normal etc
