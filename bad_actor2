@@ -147,7 +147,7 @@ export default class BadActor2 {
     this._inbox.push(msg)
     if (this._cntxStack.length && this._cntxStack[this._cntxStack.length - 1]['blocking']) {
       try {
-        this.RECEIVE(null, null)
+        this._popAndDoLastContextOnStack()
       } catch (e) {
         // this protects the caller, but how to kill the object?
         this._killObject(e.message)
@@ -155,9 +155,9 @@ export default class BadActor2 {
     }
   }
 
-  _performAction(actionf: Function, msg: MsgT): boolean {
+  _tryOrDie(callback: Function, optArg?: *): boolean {
     try {
-      actionf(msg)
+      callback(optArg)
       return true
     } catch (e) {
       this._killObject(e.message)
@@ -166,15 +166,12 @@ export default class BadActor2 {
     }
   }
 
+  _performAction(actionf: Function, msg: MsgT): boolean {
+    return this._tryOrDie(actionf, msg)
+  }
+
   _performContinuation(continuef: Function): boolean {
-    try {
-      continuef()
-      return true
-    } catch (e) {
-      this._killObject(e.message)
-      tempReportError(e)
-      return false
-    }
+    return this._tryOrDie(continuef)
   }
 
   _unwindCntxtStack(): boolean {
@@ -196,6 +193,13 @@ export default class BadActor2 {
       if (!shouldContinue) return false
     }
     return true
+  }
+
+  _unwindAndExitIfBottom() {
+    let empty = this._unwindCntxtStack()
+    if (empty) {
+      this._killObject('normal')
+    }
   }
 
   _killObject(reason: string): void {
@@ -226,111 +230,102 @@ export default class BadActor2 {
     return !!this._cntxStack.length && (this._cntxStack[this._cntxStack.length - 1]['blocking'] === true)
   }
 
-  RECEIVE(maybeMatchStatementObjects: ?MatchObectsT, maybeContinuation: ?ContinuationFunctionT, maybeTimeout: ?number): void {
-    if (this.DEAD) return
-    invariant((maybeMatchStatementObjects && maybeContinuation) || (!maybeMatchStatementObjects && !maybeContinuation), 'arg error')
-    let cntxt: ContextT
-    let matchStatementObjects: MatchObectsT
-    let continuation: ContinuationFunctionT
-
-    if (maybeMatchStatementObjects && maybeContinuation) {
-      // this is a call not a retry, make a new context
-      matchStatementObjects = maybeMatchStatementObjects
-      continuation = maybeContinuation
-      if (_.chain(this._cntxStack).pluck('blocking').contains(true).value()) {
-        throw BLOCKED_ERROR
-      }
-      cntxt = {id: cntxtCounter++, blocking: false, timer: null, ms: matchStatementObjects, continuation: continuation}
-      let timer = null
-      if (maybeTimeout === 0) {
-        timer = IMMEDIATE_TIMEOUT
-      } else if (maybeTimeout && maybeTimeout > 0) {
-        timer = setTimeout(() => {
-          if (cntxt['timer'] === timer) {
-            cntxt['timer'] = null
-            invariant(cntxt.ms, 'timer would have been cleared if we had been killed')
-            invariant(this._cntxStack.length > 0 && this._cntxStack[this._cntxStack.length - 1]['blocking'], 'did we forget to clear the timer or something')
-            const timeOutObject = _.find(cntxt.ms, function(matchObject) {
-              return matchObject.match === TIME_OUT
-            })
-            invariant(timeOutObject, 'if you passed a timeout value, you must add a timeout clause')
-            try {
-              let shouldContinue = this._performAction(timeOutObject['action'], null)
-              if (!shouldContinue) {
-                return
-              }
-
-              let empty = this._unwindCntxtStack()
-              if (empty) {
-                this._killObject('normal')
-              }
-            } catch (e) {
-              this._killObject(e.message)
-            }
-          } else { throw new Error('did we mess up the timer?') }
-        }, maybeTimeout)
-      }
-
-      cntxt['timer'] = timer
-      this._cntxStack.push(cntxt)
-    } else {
-      // no matches were passed in, we want to retry the top of the stack
-      cntxt = this._cntxStack[this._cntxStack.length - 1]
-      invariant(cntxt && cntxt['blocking'], 'we are only retrying blocking receives')
-      invariant(cntxt.ms, 'must have this')
-      invariant(cntxt.continuation, 'must have this')
-      matchStatementObjects = cntxt.ms
-      continuation = cntxt.continuation
-      cntxt['blocking'] = false
+  _timeoutCallback(timer: number) {
+    invariant(this._cntxStack.length > 0 && this._cntxStack[this._cntxStack.length - 1]['blocking'], 'did we forget to clear the timer or something')
+    const cntxt: ContextT = _.last(this._cntxStack)
+    invariant(cntxt['timer'] === timer, 'did we mess up the timer?')
+    invariant(cntxt.ms, 'timer would have been cleared if we had been killed')
+    const timeOutms = _.find(cntxt.ms, function(matchObject) { return matchObject.match === TIME_OUT })
+    invariant(timeOutms, 'if  passed a timeout value, you must add a timeout clause')
+    cntxt['timer'] = null
+    let shouldContinue = this._performAction(timeOutms['action'], null)
+    if (!shouldContinue) {
+      return
     }
+    this._unwindAndExitIfBottom()
+  }
+
+  _newTimer(timeout: number): number {
+    if (timeout === 0) return IMMEDIATE_TIMEOUT
+    const timer = setTimeout(() => {
+      this._timeoutCallback(timer)
+    }, timeout)
+    return timer
+  }
+
+  // makes a new context and pushes it onto the stack
+  RECEIVE(matchStatementObjects: MatchObectsT, continuation: ContinuationFunctionT, maybeTimeout: ?number): void {
+    if (this.DEAD) return
+    if (_.chain(this._cntxStack).pluck('blocking').contains(true).value()) {
+      throw BLOCKED_ERROR
+    }
+    invariant((matchStatementObjects && continuation), 'arg error')
+    const timer = maybeTimeout == null ? null : this._newTimer(maybeTimeout)
+    const cntxt: ContextT = {id: cntxtCounter++, blocking: false, timer: timer, ms: matchStatementObjects, continuation: continuation}
+    this._cntxStack.push(cntxt)
+    this._popAndDoLastContextOnStack()
+  }
+
+  // indexOfCurrentCntx is how it works, cant remember why
+  attemptMatch(msg: MsgT, matchStatementObject: MatchObjectT, indexOfCurrentCntx: number): string {
+    const matchResult: boolean = matches(matchStatementObject['match'], msg)
+    if (matchResult) {
+      this._inbox = [...this._savedMsgs, ...this._inbox] // put save queue back, in the right order (the order they arrived) eek they need an index
+      this._savedMsgs = []
+      const cntxt = this._cntxStack[indexOfCurrentCntx]
+      if (cntxt['timer'] /* && cntxt['timer'] !== IMMEDIATE_TIMEOUT */) {
+        clearTimeout(cntxt['timer'])
+        cntxt['timer'] = null
+      }
+      // shit! the inner receive can be blocking, in which case don't do the continuation
+      invariant(!cntxt['blocking'], 'blocking sanity check')
+      let shouldContinue = this._performAction(matchStatementObject['action'], msg)
+      if (!shouldContinue) {
+        return 'nomore'
+      }
+      const innerDidFailToMatchAndIsBlocking: boolean = (this._cntxStack.length > (indexOfCurrentCntx + 1)) && this._cntxStack[this._cntxStack.length - 1]['blocking']
+      if (innerDidFailToMatchAndIsBlocking) {
+        // the inner context is blocking, not us
+        return 'nomore'
+      } else {
+        this._unwindAndExitIfBottom()
+        return 'nomore'
+      }
+    } else {
+      return 'no_match'
+    }
+  }
+
+  _popAndDoLastContextOnStack() {
     const indexOfCurrentCntx = this._cntxStack.length - 1
+    const cntxt = this._cntxStack[indexOfCurrentCntx]
+    invariant(cntxt.ms && cntxt.ms.length, 'must have this')
+    invariant(cntxt.continuation, 'must have this')
+    const matchStatementObjects = cntxt.ms
     const inboxclone: Array<MsgT> = this._inbox.slice(0)
+    cntxt['blocking'] = false
     for (let inboxPtr = 0; inboxPtr < inboxclone.length; inboxPtr++) {
       const msg = inboxclone[inboxPtr]
       this._inbox.shift()
       for (let matchStatementPtr = 0; matchStatementPtr < matchStatementObjects.length; matchStatementPtr++) {
         const matchStatementObject = matchStatementObjects[matchStatementPtr]
-
         // timeout clause is handled seperately
         // temp, this is only going to work while we have simple string matching
         if (matchStatementObject['match'] === TIME_OUT) continue
-
-        const matchResult: boolean = matches(matchStatementObject['match'], msg)
-        if (matchResult) {
-          this._inbox = [...this._savedMsgs, ...this._inbox] // put save queue back, in the right order (the order they arrived) eek they need an index
-          this._savedMsgs = []
-          if (cntxt['timer'] /* && cntxt['timer'] !== IMMEDIATE_TIMEOUT */) {
-            clearTimeout(cntxt['timer'])
-            cntxt['timer'] = null
-          }
-          // shit! the inner receive can be blocking, in which case don't do the continuation
-          invariant(!cntxt['blocking'], 'blocking sanity check')
-          let shouldContinue = this._performAction(matchStatementObject['action'], msg)
-          if (!shouldContinue) {
+        switch (this.attemptMatch(msg, matchStatementObject, indexOfCurrentCntx)) {
+          case 'no_match':
+            this._savedMsgs.push(msg)
+            break
+          case 'nomore':
             return
-          }
-          const innerDidFailToMatchAndIsBlocking: boolean = (this._cntxStack.length > (indexOfCurrentCntx + 1)) && this._cntxStack[this._cntxStack.length - 1]['blocking']
-          if (innerDidFailToMatchAndIsBlocking) {
-            // the inner context is blocking, not us
-            return
-          } else {
-            let empty = this._unwindCntxtStack()
-            if (empty) {
-              this._killObject('normal')
-            }
-            return
-          }
-        } else {
-          this._savedMsgs.push(msg)
+          default:
+            debugger
+            // continue
         }
       }
     }
-
     if (cntxt['timer'] === IMMEDIATE_TIMEOUT) {
-      let empty = this._unwindCntxtStack()
-      if (empty) {
-        this._killObject('normal')
-      }
+      this._unwindAndExitIfBottom()
     } else {
       // we are now blocking, what does this mean? No more receives can be called on this pid, etc.
       cntxt['blocking'] = true
