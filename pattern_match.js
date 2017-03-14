@@ -3,7 +3,7 @@ import _ from 'underscore'
 
 type MsgT = any
 
-// nicked from underscore and crippled by me, dont copy this as a general purpose deep equels
+// nicked from underscore and crippled by me, dont copy this as a general purpose deep equals
 export default function matches(pattern: MsgT, msg: MsgT, aStack: Array<any>, bStack: Array<any>): boolean {
   if (pattern === '*') return true
   if (pattern === msg) return pattern !== 0 || 1 / pattern === 1 / msg
