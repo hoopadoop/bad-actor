@@ -1,7 +1,7 @@
 /* @flow */
 import _ from 'underscore'
 import invariant from 'invariant'
-import matches from './pattern_match'
+import Mailbox from './mailbox'
 
 export const BLOCKED_ERROR: Error = new Error('attempt to receive while blocking')
 
@@ -31,9 +31,8 @@ function tempReportError(e) {
 }
 
 export default class BadActor2 {
+  _inbox: Mailbox
   _cntxStack: Array<ContextT>
-  _inbox: Array<MsgT>
-  _savedMsgs: Array<MsgT>
   _monitors: Array<BadActor2>
   _links: Array<BadActor2>
   _trapExit: boolean
@@ -41,8 +40,7 @@ export default class BadActor2 {
 
   resetState(): void {
     this._cntxStack = []
-    this._inbox = []
-    this._savedMsgs = []
+    this._inbox = new Mailbox()
     this._monitors = []
     this._links = []
     this._trapExit = false
@@ -90,7 +88,7 @@ export default class BadActor2 {
     if (this.DEAD) return
     if (msg === TIME_OUT) throw new Error('timeout is private')
     this._inbox.push(msg)
-    if (this._cntxStack.length && this._cntxStack[this._cntxStack.length - 1]['blocking']) {
+    if (this._cntxStack.length && this._cntxStack[this._cntxStack.length - 1].blocking) {
       try {
         this._popAndDoLastContextOnStack()
       } catch (e) {
@@ -124,11 +122,11 @@ export default class BadActor2 {
       var cntxt = this._cntxStack.pop()
       invariant(cntxt.ms, 'ms should be here')
       invariant(cntxt.continuation, 'this should be here')
-      invariant(cntxt['timer'] === IMMEDIATE_TIMEOUT || cntxt['timer'] == null, 'timeout config error')
-      if (cntxt['timer'] === IMMEDIATE_TIMEOUT) {
+      invariant(cntxt.timer === IMMEDIATE_TIMEOUT || cntxt.timer == null, 'timeout config error')
+      if (cntxt.timer === IMMEDIATE_TIMEOUT) {
         const timeOutObject = _.find(cntxt.ms, function(matchObject) { return matchObject.match === TIME_OUT })
         if (timeOutObject) {
-          let shouldContinue = this._performAction(timeOutObject['action'], null)
+          let shouldContinue = this._performAction(timeOutObject.action, null)
           if (!shouldContinue) {
             return false
           }
@@ -155,9 +153,9 @@ export default class BadActor2 {
       let cntxt = this._cntxStack[i]
       cntxt.ms = null
       cntxt.continuation = null
-      if (cntxt['timer'] && cntxt['timer'] !== IMMEDIATE_TIMEOUT) {
-        clearTimeout(cntxt['timer'])
-        cntxt['timer'] = null
+      if (cntxt.timer && cntxt.timer !== IMMEDIATE_TIMEOUT) {
+        clearTimeout(cntxt.timer)
+        cntxt.timer = null
       }
     }
     this._monitors.forEach((monitor) => {
@@ -172,18 +170,18 @@ export default class BadActor2 {
   }
 
   _blocking(): boolean {
-    return !!this._cntxStack.length && (this._cntxStack[this._cntxStack.length - 1]['blocking'] === true)
+    return !!this._cntxStack.length && (this._cntxStack[this._cntxStack.length - 1].blocking === true)
   }
 
   _timeoutCallback(timer: number) {
-    invariant(this._cntxStack.length > 0 && this._cntxStack[this._cntxStack.length - 1]['blocking'], 'did we forget to clear the timer or something')
+    invariant(this._cntxStack.length > 0 && this._cntxStack[this._cntxStack.length - 1].blocking, 'did we forget to clear the timer or something')
     const cntxt: ContextT = _.last(this._cntxStack)
-    invariant(cntxt['timer'] === timer, 'did we mess up the timer?')
+    invariant(cntxt.timer === timer, 'did we mess up the timer?')
     invariant(cntxt.ms, 'timer would have been cleared if we had been killed')
     const timeOutms = _.find(cntxt.ms, function(matchObject) { return matchObject.match === TIME_OUT })
     invariant(timeOutms, 'if  passed a timeout value, you must add a timeout clause')
-    cntxt['timer'] = null
-    let shouldContinue = this._performAction(timeOutms['action'], null)
+    cntxt.timer = null
+    let shouldContinue = this._performAction(timeOutms.action, null)
     if (!shouldContinue) {
       return
     }
@@ -211,66 +209,42 @@ export default class BadActor2 {
     this._popAndDoLastContextOnStack()
   }
 
-  // indexOfCurrentCntx is how it works, cant remember why
-  attemptMatch(msg: MsgT, matchStatementObject: MatchObjectT, indexOfCurrentCntx: number): string {
-    const matchResult: boolean = matches(matchStatementObject['match'], msg)
-    if (matchResult) {
-      this._inbox = [...this._savedMsgs, ...this._inbox] // put save queue back, in the right order (the order they arrived) eek they need an index
-      this._savedMsgs = []
-      const cntxt = this._cntxStack[indexOfCurrentCntx]
-      if (cntxt['timer'] /* && cntxt['timer'] !== IMMEDIATE_TIMEOUT */) {
-        clearTimeout(cntxt['timer'])
-        cntxt['timer'] = null
-      }
-      // shit! the inner receive can be blocking, in which case don't do the continuation
-      invariant(!cntxt['blocking'], 'blocking sanity check')
-      if (!this._performAction(matchStatementObject['action'], msg)) return 'exit'
-
-      if ((this._cntxStack.length > (indexOfCurrentCntx + 1)) && this._cntxStack[this._cntxStack.length - 1]['blocking']) {
-        return 'innerblocking'
-      } else {
-        this._unwindAndExitIfBottom()
-        return 'ok'
-      }
-    } else {
-      return 'no_match'
-    }
-  }
-
+  // get rid of all these godamn strings
   _popAndDoLastContextOnStack() {
     const indexOfCurrentCntx = this._cntxStack.length - 1
     const cntxt = this._cntxStack[indexOfCurrentCntx]
-    invariant(cntxt.ms && cntxt.ms.length, 'must have this')
-    invariant(cntxt.continuation, 'must have this')
-    const matchStatementObjects = cntxt.ms
-    const inboxclone: Array<MsgT> = this._inbox.slice(0)
-    cntxt['blocking'] = false
-    for (let inboxPtr = 0; inboxPtr < inboxclone.length; inboxPtr++) {
-      const msg = inboxclone[inboxPtr]
-      this._inbox.shift()
-      for (let matchStatementPtr = 0; matchStatementPtr < matchStatementObjects.length; matchStatementPtr++) {
-        const matchStatementObject = matchStatementObjects[matchStatementPtr]
-        // timeout clause is handled seperately
-        // temp, this is only going to work while we have simple string matching
-        if (matchStatementObject['match'] === TIME_OUT) continue
-        switch (this.attemptMatch(msg, matchStatementObject, indexOfCurrentCntx)) {
-          case 'no_match':
-            this._savedMsgs.push(msg)
-            break
-          case 'exit':
-          case 'innerblocking':
-          case 'ok':
-            return
-          default:
-            // continue
-        }
+    invariant(cntxt.ms && cntxt.ms.length, 'current context must have matchers and stuff')
+    const matchStatementObjects: MatchObectsT = cntxt.ms
+    invariant(cntxt.continuation, 'current context requires a continuation')
+    cntxt.blocking = false
+
+    // todo: cache this
+    const theMatchers: Array<MsgT> = _.map(matchStatementObjects, (matchStatementObject) => (matchStatementObject.match))
+    // cache this
+
+    const match = this._inbox.match(theMatchers)
+    if (match) {
+      if (cntxt.timer /* && cntxt['timer'] !== IMMEDIATE_TIMEOUT */) {
+        clearTimeout(cntxt.timer)
+        cntxt.timer = null
       }
+      const [msg, matcherIndex] = match
+      const matchStatementObject = matchStatementObjects[matcherIndex]
+
+      // shit! the inner receive can be blocking, in which case don't do the continuation
+      const shouldExit = !this._performAction(matchStatementObject.action, msg)
+      const isInnerAndBlocking = (this._cntxStack.length > (indexOfCurrentCntx + 1)) && this._cntxStack[this._cntxStack.length - 1].blocking
+      if (!shouldExit && !isInnerAndBlocking) {
+        this._unwindAndExitIfBottom()
+      }
+      return
     }
-    if (cntxt['timer'] === IMMEDIATE_TIMEOUT) {
+
+    if (cntxt.timer === IMMEDIATE_TIMEOUT) {
       this._unwindAndExitIfBottom()
     } else {
       // we are now blocking, what does this mean? No more receives can be called on this pid, etc.
-      cntxt['blocking'] = true
+      cntxt.blocking = true
     }
   }
 }
@@ -291,7 +265,8 @@ export function sendMsg(name: string, msg: MsgT): void {
 }
 
 export function registered(): Array<string> {
-  return (_.keys(_.pick(_actorsRegister, _.identity)))
+  const withoutNullObjects = _.pick(_actorsRegister, _.identity)
+  return _.keys(withoutNullObjects)
 }
 
 // passing the name around and calling whereis on it is a race bacause of restarting. Erlang adds unique refs to messages
