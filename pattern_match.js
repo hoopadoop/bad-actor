@@ -1,5 +1,4 @@
 /* @flow */
-import _ from 'underscore'
 
 type MsgT = any
 
@@ -8,8 +7,8 @@ export default function matches(pattern: MsgT, msg: MsgT, aStack?: Array<any>, b
   if (pattern === '*') return true
   if (pattern === msg) return pattern !== 0 || 1 / pattern === 1 / msg
   if (pattern == null || msg == null) return pattern === msg
-  const className = toString.call(pattern)
-  if (className !== toString.call(msg)) return false
+  const className = Object.prototype.toString.call(pattern)
+  if (className !== Object.prototype.toString.call(msg)) return false
   switch (className) {
     case '[object RegExp]':
     case '[object String]':
@@ -26,7 +25,7 @@ export default function matches(pattern: MsgT, msg: MsgT, aStack?: Array<any>, b
     if (typeof pattern !== 'object' || typeof msg !== 'object') return false
     const aCtor = pattern.constructor
     const bCtor = msg.constructor
-    if (aCtor !== bCtor && !(_.isFunction(aCtor) && aCtor instanceof aCtor && _.isFunction(bCtor) && bCtor instanceof bCtor) && ('constructor' in pattern && 'constructor' in msg)) {
+    if (aCtor !== bCtor && !(aCtor.apply && aCtor.call && aCtor instanceof aCtor && bCtor.apply && bCtor.call && bCtor instanceof bCtor) && ('constructor' in pattern && 'constructor' in msg)) {
       return false
     }
   }
@@ -45,13 +44,13 @@ export default function matches(pattern: MsgT, msg: MsgT, aStack?: Array<any>, b
       if (!matches(pattern[length], msg[length], aStack, bStack)) return false
     }
   } else {
-    var keys = _.keys(pattern)
+    var keys = Object.keys(pattern)
     var key
     length = keys.length
-    if (_.keys(msg).length !== length) return false
+    if (Object.keys(msg).length !== length) return false
     while (length--) {
       key = keys[length]
-      if (!(_.has(msg, key) && matches(pattern[key], msg[key], aStack, bStack))) return false
+      if (!(hasOwnProperty.call(msg, key) && matches(pattern[key], msg[key], aStack, bStack))) return false
     }
   }
   aStack.pop()
