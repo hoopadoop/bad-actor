@@ -1,76 +1,90 @@
 /* @flow */
-import invariant from 'invariant'
-import Mailbox from './mailbox'
+import invariant from "invariant"
+import Mailbox from "./mailbox"
 
-export const BLOCKED_ERROR: Error = new Error('attempt to receive while blocking')
+export const BLOCKED_ERROR: Error = new Error(
+  "attempt to receive while blocking"
+)
 
 export type MsgT = any
-export type ContinuationFunctionT = () => void
-export type ActionFunctionT = (msg: MsgT) => void
+export type ContinuationFunctionT = () => ?any
+export type ActionFunctionT = (msg: MsgT) => ?any // maybe return a thunk
+type Tampf = (arg?: any) => ?Tampf
 
-type MatchObjectT = {match: MsgT, action: ActionFunctionT}
+type MatchObjectT = { match: MsgT, action: ActionFunctionT }
 type MatchObectsT = Array<MatchObjectT>
 
-const STACK_IS_EMPTY = true
-const STACK_HAS_ITEMS = false
-type StackEmptyResultT = boolean
-
-const ActionResult = {
-  RAN_OK: 'RAN_OK',
-  CRASHED: 'CRASHED',
-  BLOCKED: 'BLOCKED'
-}
-type ActionResultT = $Keys<typeof ActionResult>
+// const ActionResult = {
+//  RAN_OK: "RAN_OK",
+//  CRASHED: "CRASHED",
+//  BLOCKED: "BLOCKED"
+// }
+// type ActionResultT = $Keys<typeof ActionResult>
 
 // globally registered actors
 const _actorsRegister = {}
 
-var cntxtCounter = 1
 type ContextT = {
-  id: number,
-  blocking: boolean,
-  timer: ?number,
   ms: MatchObectsT,
-  matchers: Array<MsgT>,
-  continuation: ?ContinuationFunctionT,
-  isRunningContinuation?: string
+  continuation: ?ContinuationFunctionT
 }
 var refId = 0
-export const TIME_OUT: string = '1234567_TIMEOUT'
-export const DOWN: string = '1234567_DOWN'
-export const EXIT: string = '1234567_EXIT'
+export const TIME_OUT: string = "1234567_TIMEOUT"
+export const DOWN: string = "1234567_DOWN"
+export const EXIT: string = "1234567_EXIT"
 
-type SignalT = {name: '1234567_EXIT', pid: *, reason: string}
-export type MonitorRef = {id: number, theMonitoringActor: *, theMonitoredActor: *}
+type SignalT = { name: "1234567_EXIT", pid: *, reason: string }
 
-const IMMEDIATE_TIMEOUT = -1
+// const IMMEDIATE_TIMEOUT = -1
 
-function tempReportError(e) {
-  console.error(e)
+export type MonitorRef = {
+  id: number,
+  theMonitoringActor: *,
+  theMonitoredActor: *
 }
 
-var debugStackLimit = 20
+function bodge(f, c): void {
+  while (f.continuation && f !== f.continuation) {
+    f = f.continuation
+  }
+  f.continuation = c
+}
+
+function preparedActionFromMatch(
+  match: MatchObjectT,
+  msg: MsgT
+): ActionFunctionT {
+  match.action.args = [msg]
+  return match.action
+}
 
 function FAKE_INIT(actor) {}
 
-export default class BadActor2 {
-  _halfinitialized: bool
+export default class Actor2 {
+  _halfinitialized: boolean
   _inbox: Mailbox
-  _cntxStack: Array<ContextT>
+  stashedData: ?ContextT
+  _links: Array<Actor2>
   _monitors: Array<MonitorRef>
-  _links: Array<BadActor2>
+  timer: ?TimeoutID
+  inTrampoline: boolean
   _trapExit: boolean
   DEAD: boolean
 
   resetState(): void {
-    this._cntxStack = []
+    this.stashedData = null
+    this.timer = null
     this._inbox = new Mailbox()
     this._monitors = []
     this._links = []
+    this.inTrampoline = false
     this._trapExit = false
   }
 
-  constructor(moduleInit: (actor: BadActor2, ...initArgs?: any) => void, ...initArgs?: any) {
+  constructor(
+    moduleInit: (actor: Actor2, ...initArgs?: any) => ?any,
+    ...initArgs: any
+  ) {
     if (moduleInit === FAKE_INIT) {
       this.resetState()
       this._halfinitialized = true
@@ -82,8 +96,9 @@ export default class BadActor2 {
       this.resetState()
     }
     moduleInit(this, ...initArgs)
-    // if the module init function didn't block (kinda pointless but not necessarily illegal) we're done so kill us
-    if (!this.DEAD && this._cntxStack.length === 0) this._killObject('normal')
+    if (!this._blocking() && !this.DEAD) {
+      this._killObject("normal")
+    }
   }
 
   trapExit(flag: boolean): void {
@@ -91,42 +106,58 @@ export default class BadActor2 {
     this._trapExit = flag
   }
 
-  spawnLink(moduleInit: (actor: BadActor2, ...initArgs?: any) => void, ...initArgs?: any) {
+  spawnLink(
+    moduleInit: (actor: Actor2, ...initArgs: any) => void,
+    ...initArgs: any
+  ) {
     try {
-      var pid = new BadActor2(FAKE_INIT)
+      var pid = new Actor2(FAKE_INIT)
       pid.link(this)
       pid.constructor(moduleInit, ...initArgs)
     } catch (e) {
-      invariant(pid, 'hmm')
+      invariant(pid, "passed init function threw error")
       pid._killObject(e.message)
     }
     return pid
   }
 
-  link(theMonitoringActor: BadActor2): boolean {
+  link(theMonitoringActor: Actor2): boolean {
     if (theMonitoringActor === this || this.DEAD) return true
     if (!theMonitoringActor || theMonitoringActor.DEAD) {
       if (!this._trapExit) {
-        throw new Error('noproc')
+        throw new Error("noproc")
       } else {
-        const msg: SignalT = {name: '1234567_EXIT', pid: theMonitoringActor, reason: 'noproc'}
+        const msg: SignalT = {
+          name: "1234567_EXIT",
+          pid: theMonitoringActor,
+          reason: "noproc"
+        }
         this.signal(msg)
       }
     }
 
-    if (theMonitoringActor._links.indexOf(this) === -1) theMonitoringActor._links.push(this)
-    if (this._links.indexOf(theMonitoringActor) === -1) this._links.push(theMonitoringActor)
+    if (theMonitoringActor._links.indexOf(this) === -1)
+      theMonitoringActor._links.push(this)
+    if (this._links.indexOf(theMonitoringActor) === -1)
+      this._links.push(theMonitoringActor)
     return true
   }
 
   // called on the node you want to monitor
-  monitorBy(theMonitoringActor: BadActor2): MonitorRef {
-    var ref = {id: ++refId, theMonitoringActor: theMonitoringActor, theMonitoredActor: this}
+  monitorBy(theMonitoringActor: Actor2): MonitorRef {
+    var ref = {
+      id: ++refId,
+      theMonitoringActor: theMonitoringActor,
+      theMonitoredActor: this
+    }
     if (this.DEAD) {
-      theMonitoringActor.sendMsg({name: DOWN, pid: this, reason: 'noproc'})
+      theMonitoringActor.send({ name: DOWN, pid: this, reason: "noproc" })
       return ref
     }
-    invariant(theMonitoringActor && theMonitoringActor !== this, 'dont link to null or self')
+    invariant(
+      theMonitoringActor && theMonitoringActor !== this,
+      "dont link to null or self"
+    )
     this._monitors.push(ref)
     return ref
   }
@@ -142,248 +173,211 @@ export default class BadActor2 {
     return false
   }
 
+  tramapoline(f: Tampf): ?any {
+    invariant(this.inTrampoline === false, "use one trampoline")
+    this.inTrampoline = true
+    try {
+      while (f && f instanceof Function) {
+        var c = f.continuation
+        var ff = f.apply(f.context, f.args)
+        if (ff && !c) {
+          f = ff
+        } else if (!ff && c) {
+          if (this.stashedData) {
+            // move the continuations forward in the trampoline chain
+            for (var i = 0; i < this.stashedData.ms.length; i++) {
+              bodge(this.stashedData.ms[i].action, c)
+            }
+            f = ff
+          } else {
+            f = c
+          }
+        } else if (ff && c) {
+          bodge(ff, c)
+          f = ff
+        } else {
+          f = ff
+          if (!this._blocking()) this._killObject("normal")
+        }
+      }
+    } catch (e) {
+      this._killObject(e)
+    }
+    this.inTrampoline = false
+    return f
+  }
+
   signal(msg: SignalT): void {
     if (this.DEAD) return
     switch (msg.name) {
       case EXIT:
         // a kill signal can't be trapped, and always kills the actor, but is forwarded to links as killed so it doesn't cascade
-        if (this._trapExit && msg.reason !== 'kill') {
-          this.sendMsg(msg)
+        if (this._trapExit && msg.reason !== "kill") {
+          this.send(msg)
         } else {
-          if (msg.reason !== 'normal') this._killObject(msg.reason)
+          if (msg.reason !== "normal") this._killObject(msg.reason)
         }
         break
     }
   }
 
-  sendMsg(msg: MsgT): void {
+  send(msg: MsgT): ?ActionFunctionT {
     if (this.DEAD) {
-      console.debug('Swallowing ' + JSON.stringify(msg))
+      console.debug("Swallowing " + JSON.stringify(msg))
       return
     }
-    if (msg === TIME_OUT) throw new Error('timeout is private')
+    if (this.inTrampoline) {
+      return this._send(msg)
+    } else {
+      this.tramapoline(() => this._send(msg))
+    }
+  }
+
+  _send(msg: MsgT): ?ActionFunctionT {
     this._inbox.push(msg)
-    if (this._cntxStack.length && this._cntxStack[this._cntxStack.length - 1].blocking) {
-      try {
-        this._popAndDoLastContextOnStack()
-      } catch (e) {
-        this._killObject(e.message)
-      }
-    }
-  }
-
-  _tryOrDie(callback: Function, optArg?: *): ActionResultT {
-    try {
-      const indexOfCurrentCntx = this._cntxStack.length
-      callback(optArg, callback)
-      if (this.DEAD) {
-        // abusing this for the minute, we didn't crash at all, but we don't want to continue
-        return ActionResult.CRASHED
-      }
-
-      const isInnerAndBlocking = this._cntxStack.length > indexOfCurrentCntx && this._cntxStack[this._cntxStack.length - 1].blocking
-      return isInnerAndBlocking ? ActionResult.BLOCKED : ActionResult.RAN_OK
-    } catch (e) {
-      this._killObject(e.message)
-      tempReportError(e)
-      return ActionResult.CRASHED
-    }
-  }
-
-  _performAction(cntxt: ContextT, actionf: Function, msg: MsgT): void {
-    cntxt.blocking = false
-    if (cntxt.timer && cntxt['timer'] !== IMMEDIATE_TIMEOUT) {
-      clearTimeout(cntxt.timer)
-    }
-    cntxt.timer = null
-    const actionResult = this._tryOrDie(actionf, msg)
-    if (actionResult === ActionResult.BLOCKED && this._cntxStack.length > 1) {
-      this._keepStackSmall()
-    }
-    if (actionResult === ActionResult.RAN_OK) {
-      this._unwindAndExitIfBottom()
-    }
-  }
-
-  _performContinuation(continuef: Function): ActionResultT {
-    return this._tryOrDie(continuef)
-  }
-
-  _selectTimeOutActionFromMatchers(cntxt: ContextT): ActionFunctionT {
-    const timeOutms = cntxt.ms.find(matchObject => matchObject.match === TIME_OUT)
-    invariant(timeOutms, 'if  passed a timeout value, you must add a timeout clause')
-    // TODO: match in the proper way so we dont have to do this
-    this._inbox.restoreSavedMsgs()
-    return timeOutms.action
-  }
-
-  _unwindCntxtStack(): StackEmptyResultT {
-    for (let i = this._cntxStack.length; i > 0; i--) {
-      const cntxt = this._cntxStack[i - 1]
-
-      // messing about a bit to see if we can make it safe to receive inside the continuation
-      if (cntxt.isRunningContinuation === 'inside now') {
-        // exit leaving the cntxt whose continuation is running remaining on the stack
-        return STACK_HAS_ITEMS
-      }
-
-      invariant(cntxt.timer == null, 'timeout config error')
-
-      if (cntxt.continuation && cntxt.isRunningContinuation !== 'exited because inner blockage') {
-        // invariant(cntxt.continuation, 'is underscore lying? -- this is really to help flow')
-        const c:ContinuationFunctionT = cntxt.continuation
-
-        // experimental support for receive in continuation
-        // add a context back on the stack that a receive in the continuation
-        // can't remove (it checks for isRunningContinuation when unwinding), so
-        // we know we wont be killed in the inner unwinding
-        cntxt.isRunningContinuation = 'inside now'
-
-        const actionResult = this._performContinuation(c)
-        if (actionResult !== ActionResult.RAN_OK) {
-          if (actionResult === ActionResult.BLOCKED) {
-            // we are exiting here without emptying.. we don't want the inner unwind
-            // to clean up
-            cntxt.isRunningContinuation = 'exited because inner blockage'
-          }
-          return STACK_HAS_ITEMS
-        }
-      }
-      this._cntxStack.pop()
-    }
-    return STACK_IS_EMPTY
-  }
-
-  _unwindAndExitIfBottom() {
-    const empty = this._unwindCntxtStack()
-    if (empty) {
-      this._killObject('normal')
-    }
+    if (!this.stashedData) return null
+    return this.hasMatchFor(
+      this.stashedData,
+      () => {
+        if (this.timer) clearTimeout(this.timer)
+        this.timer = null
+        this.stashedData = null
+      },
+      null
+    )
   }
 
   _killObject(reason: string): void {
-    invariant(!this.DEAD, 'something has gone wrong if we call this twice')
-    Object.keys(_actorsRegister).forEach(k => _actorsRegister[k] === this && unregister(k))
+    invariant(!this.DEAD, "something has gone wrong if we call this twice")
+    Object.keys(_actorsRegister).forEach(
+      k => _actorsRegister[k] === this && unregister(k)
+    )
     this.DEAD = true
-    for (let i = 0; i < this._cntxStack.length; i++) {
-      const cntxt = this._cntxStack[i]
-      if (cntxt.timer && cntxt.timer !== IMMEDIATE_TIMEOUT) {
-        clearTimeout(cntxt.timer)
-        cntxt.timer = null
-      }
-    }
-    if (reason === 'kill') {
-      reason = 'killed'
+
+    if (this.timer) clearTimeout(this.timer)
+
+    if (reason === "kill") {
+      reason = "killed"
     }
     this._monitors.forEach((monitorRef: MonitorRef) => {
       // maybe need a unique reference
-      monitorRef.theMonitoringActor.sendMsg({name: DOWN, pid: this, reason: reason})
+      monitorRef.theMonitoringActor.send({
+        name: DOWN,
+        pid: this,
+        reason: reason
+      })
     })
-    this._links.forEach((linked) => {
+    this._links.forEach(linked => {
       var l = linked._links.indexOf(this)
-      invariant(l > -1, 'must contain link')
+      invariant(l > -1, "must contain link")
       linked._links.splice(l, 1)
-      const msg: SignalT = {name: '1234567_EXIT', pid: this, reason: reason}
+      const msg: SignalT = { name: "1234567_EXIT", pid: this, reason: reason }
       linked.signal(msg)
     })
     this.resetState()
   }
 
   _blocking(): boolean {
-    return !!this._cntxStack.length && (this._cntxStack[this._cntxStack.length - 1].blocking === true)
+    return !!this.stashedData
   }
 
-  _timeoutCallback(timer: number) {
-    const cntxt: ContextT = this._cntxStack[this._cntxStack.length - 1]
-    invariant(cntxt && cntxt.blocking, 'did we forget to clear the timer or something')
-    invariant(cntxt.timer === timer, 'did we mess up the timer?')
-    invariant(cntxt.ms, 'timer would have been cleared if we had been killed')
-
-    const timeoutAction = this._selectTimeOutActionFromMatchers(cntxt)
-    this._performAction(cntxt, timeoutAction, TIME_OUT)
-  }
-
-  _newTimer(timeout: number): number {
-    if (timeout === 0) return IMMEDIATE_TIMEOUT
-    const timer = setTimeout(() => {
-      this._timeoutCallback(timer)
-    }, timeout)
-    return timer
-  }
-
-  // makes a new context and pushes it onto the stack
-  RECEIVE(matchStatementObjects: MatchObectsT, continuation: ?ContinuationFunctionT, maybeTimeout?: number): void {
+  receive(
+    matchStatementObjects: MatchObectsT,
+    continuation: ?ContinuationFunctionT,
+    maybeTimeout?: number
+  ): ?ActionFunctionT {
     if (this.DEAD) return
-    if (this._cntxStack.find(c => c.blocking)) {
+    if (this._blocking()) {
       throw BLOCKED_ERROR
     }
-    const timer = maybeTimeout == null ? null : this._newTimer(maybeTimeout)
-    const theMatchers: Array<MsgT> = matchStatementObjects.map(matchStatementObject => matchStatementObject.match)
-    const cntxt: ContextT = {id: cntxtCounter++, blocking: false, timer: timer, ms: matchStatementObjects, matchers: theMatchers, continuation: continuation}
-    this._cntxStack.push(cntxt)
-
-    if (__DEV__ && this._cntxStack.length > debugStackLimit) {
-      debugStackLimit = debugStackLimit * 2
-      console.warn('is this._cntxStack length running away? ' + this._cntxStack.length)
-    }
-
-    this._popAndDoLastContextOnStack()
-  }
-
-  _keepStackSmall() {
-    // quick non optimal test - probably only need to do the top ones? ie to stop growing unnessesarily
-    const previousCntxtIndex = this._cntxStack.length - 2
-    const previousCntxt = this._cntxStack[previousCntxtIndex]
-    const previousCntxtIsRedundant = !previousCntxt.blocking && !previousCntxt.continuation
-    if (previousCntxtIsRedundant) {
-      this._cntxStack.splice(previousCntxtIndex, 1)
+    if (this.inTrampoline) {
+      return this._receive(matchStatementObjects, continuation, maybeTimeout)
+    } else {
+      var tfunc = () =>
+        this._receive(matchStatementObjects, continuation, maybeTimeout)
+      return this.tramapoline(tfunc)
     }
   }
 
-  // search for a match and return the associated action. might be immediate_timeout
-  _findMatchOrActionImmediateTimeoutAction(cntxt: ContextT): [?ActionFunctionT, ?MsgT] {
-    const match = this._inbox.match(cntxt.matchers)
-    if (match) {
-      const [msg, matchIndex] = match
-      return [cntxt.ms[matchIndex].action, msg]
+  _receive(
+    matchStatementObjects: MatchObectsT,
+    continuation: ?ContinuationFunctionT,
+    maybeTimeout?: number
+  ): ?ActionFunctionT {
+    invariant(this.stashedData === null, "cant stash more than one data")
+    if (continuation)
+      for (var i = 0; i < matchStatementObjects.length; i++) {
+        bodge(matchStatementObjects[i].action, continuation)
+      }
+    var c = {
+      ms: matchStatementObjects,
+      continuation: continuation
     }
-    if (cntxt.timer === IMMEDIATE_TIMEOUT) {
-      return [this._selectTimeOutActionFromMatchers(cntxt), IMMEDIATE_TIMEOUT]
+    var action = this.hasMatchFor(c, null, () => {
+      if (maybeTimeout === 0) {
+        return this.timeoutActionFromMatches(matchStatementObjects)
+      } else {
+        // now we are blocked
+        this.stashedData = c
+      }
+      return null
+    })
+
+    // if an action was found, return the action to the trampoline, could be the TIME_OUT action
+    if (!action && maybeTimeout && maybeTimeout !== 0) {
+      action = () => {
+        this.timer = setTimeout(() => {
+          invariant(this.stashedData !== null, "must be blocked")
+          this.timer = null
+          this.tramapoline(() => this.send(TIME_OUT))
+        }, maybeTimeout)
+      }
     }
-    return [null, null]
+    return action
   }
 
-  _popAndDoLastContextOnStack() {
-    const cntxt = this._cntxStack[this._cntxStack.length - 1]
-    invariant(cntxt.ms && cntxt.ms.length, 'current context must have matchers and stuff')
-
-    const [action, msg] = this._findMatchOrActionImmediateTimeoutAction(cntxt)
-    if (action) {
-      this._performAction(cntxt, action, msg)
-      return
-    }
-    // we are now blocking, what does this mean? No more receives can be called on this pid, etc.
-    cntxt.blocking = true
+  timeoutActionFromMatches(data: MatchObectsT): ActionFunctionT {
+    var msgsFromMatchers = data.map(matcher => matcher.match)
+    var foundMatch = this._inbox.fakeMatch(TIME_OUT, msgsFromMatchers)
+    invariant(
+      foundMatch,
+      "must have a timeout action if an immediate timeout was specified"
+    )
+    return preparedActionFromMatch(data[foundMatch[1]], TIME_OUT)
   }
 
-  debugMsgs() {
-    return this._inbox.debugMsgs()
+  hasMatchFor(
+    data: ContextT,
+    onTrue: ?() => void,
+    onFalse: ?() => ?ActionFunctionT
+  ): ?ActionFunctionT {
+    var msgsFromMatchers = data.ms.map(matcher => matcher.match)
+    var foundMatch = this._inbox.match(msgsFromMatchers)
+    if (!foundMatch) {
+      return onFalse && onFalse()
+    } else {
+      onTrue && onTrue()
+      var msg = foundMatch[0]
+      var match = data.ms[foundMatch[1]]
+      return preparedActionFromMatch(match, msg)
+    }
   }
 }
 
 // Not sure if we need Pids or just register the actor
-export function register(name: string, actor: BadActor2): void {
-  if (_actorsRegister[name] && _actorsRegister[name] !== actor) throw new Error('another actor already registered as ' + name)
+export function register(name: string, actor: Actor2): void {
+  if (_actorsRegister[name] && _actorsRegister[name] !== actor)
+    throw new Error("another actor already registered as " + name)
   _actorsRegister[name] = actor
 }
 
 export function unregister(name: string): void {
-  if (!_actorsRegister[name]) throw new Error('cant unregister actor ' + name)
+  if (!_actorsRegister[name]) throw new Error("cant unregister actor " + name)
   delete _actorsRegister[name]
 }
 
 export function sendMsg(name: string, msg: MsgT): void {
-  _actorsRegister[name].sendMsg(msg)
+  _actorsRegister[name].send(msg)
 }
 
 export function registered(): Array<string> {
