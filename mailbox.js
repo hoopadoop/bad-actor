@@ -1,5 +1,5 @@
 /* @flow */
-import matches from './pattern_match'
+import matches from "./pattern_match"
 
 type MsgT = any
 
@@ -17,10 +17,12 @@ export default class Mailbox {
   }
 
   match(set: Array<MsgT>): ?[MsgT, number] {
-    if (!set.length) throw new Error('cannot match nothing')
+    if (!set.length) throw new Error("cannot match nothing")
     if (!this.mbox.length) return null
     const topMsg = this.mbox.shift()
-    const matchedIndex = set.findIndex(msgFromSet => matches(msgFromSet, topMsg))
+    const matchedIndex = set.findIndex(msgFromSet =>
+      matches(msgFromSet, topMsg)
+    )
     if (matchedIndex !== -1) {
       this.restoreSavedMsgs()
       return [topMsg, matchedIndex]
@@ -28,6 +30,12 @@ export default class Mailbox {
       this.savedMsgs.push(topMsg)
       return this.match(set)
     }
+  }
+
+  fakeMatch(msg: MsgT, set: Array<MsgT>): ?[MsgT, number] {
+    const matchedIndex = set.findIndex(msgFromSet => msgFromSet === msg) // really only useful for matching TIME_OUT, tried to make general but actually you dont want to match wildcards, etc.
+    this.restoreSavedMsgs()
+    return [msg, matchedIndex]
   }
 
   _msgs(): Array<MsgT> {
@@ -45,6 +53,6 @@ export default class Mailbox {
 
   debugMsgs(): string {
     var all = [...this.savedMsgs, ...this.mbox]
-    return all.length ? JSON.stringify(all) : ''
+    return all.length ? JSON.stringify(all) : ""
   }
 }
